@@ -1,0 +1,3 @@
+[workspace]
+members = ["skepa_db_core", "skepa_db_cli", "skepa_db_tests"]
+resolver = "2"
