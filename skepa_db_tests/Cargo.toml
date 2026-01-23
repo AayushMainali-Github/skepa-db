@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-db_core = { path = "../db_core" }
+skepa_db_core = { path = "../skepa_db_core" }
 anyhow = "1"
 
