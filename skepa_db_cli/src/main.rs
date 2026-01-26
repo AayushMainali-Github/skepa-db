@@ -1,6 +1,10 @@
 use skepa_db_core::Database;
 use std::io::{self, Write};
 
+mod types;
+mod parser;
+
+
 fn main(){
     let mut db = Database::open("./mydb");
 

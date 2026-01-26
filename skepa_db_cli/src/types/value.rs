@@ -1,21 +1,9 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DataType {
-    Int,
-    Text,
-}
+use crate::types::datatype::DataType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(i64),
     Text(String),
-}
-
-pub fn parse_datatype(s: &str) -> Result<DataType, String> {
-    match s.to_lowercase().as_str() {
-        "int" => Ok(DataType::Int),
-        "text" => Ok(DataType::Text),
-        other => Err(format!("Unknown type '{other}'. Use int|text")),
-    }
 }
 
 pub fn parse_value(dtype: &DataType, token: &str) -> Result<Value, String>{
