@@ -1,8 +1,6 @@
 use skepa_db_core::Database;
+use skepa_db_core::parser::parser::parse;
 use std::io::{self, Write};
-
-mod types;
-mod parser;
 
 
 fn main(){
@@ -30,10 +28,24 @@ fn main(){
         }
 
         if input.eq_ignore_ascii_case("help"){
-            println!("Commands: anything -> ok, exit, help");
+            println!("Commands:");
+            println!("  parse <cmd>   -> show parsed Command (debug)");
+            println!("  exit|quit     -> quit");
+            println!("  help          -> help");
+            println!("  (anything else is executed)");
             continue;
         }
 
+        // ---- PARSE DEBUG MODE ----
+        if let Some(rest) = input.strip_prefix("parse ") {
+            match parse(rest) {
+                Ok(cmd) => println!("Parsed as: {cmd:?}"),
+                Err(e) => eprintln!("Parse error: {e}"),
+            }
+            continue;
+        }
+
+        // ---- NORMAL EXECUTION MODE ----
         match db.execute(input) {
             Ok(out) => println!("{out}"),
             Err(err) => println!("{err}"),
