@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+pub mod types;
+pub mod parser;
+
 #[derive(Debug)]
 pub struct Database {
     path: PathBuf,

@@ -1,5 +1,6 @@
 use crate::types::datatype::DataType;
 
+#[derive(Debug)]
 pub enum Command {
     Create {
         table: String,
