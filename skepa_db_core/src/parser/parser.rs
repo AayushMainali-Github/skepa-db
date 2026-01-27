@@ -17,36 +17,94 @@ pub fn parse(input: &str) -> Result<Command, String>{
     }
 }
 
+
 fn tokenize(input: &str) -> Result<Vec<String>, String> {
-    let mut tokens = Vec::new();
+    let mut tokens: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
+    let mut just_closed_quote = false;
 
-    for ch in input.chars() {
+    let mut it = input.chars().peekable();
+
+    while let Some(ch) = it.next() {
         match ch {
             '"' => {
-                in_quotes = !in_quotes;
-            }
-            c if c.is_whitespace() && !in_quotes => {
-                if !current.is_empty() {
-                    tokens.push(current.clone());
-                    current.clear();
+                if just_closed_quote {
+                    // Something like:  "a""b"  (no whitespace between)
+                    return Err("Unexpected quote after closing quote. Add whitespace between tokens."
+                        .to_string());
+                }
+
+                if !in_quotes {
+                    // Opening quote must start a new token
+                    if !current.is_empty() {
+                        return Err("Quote (\") cannot start in the middle of a token. Add whitespace before the quote."
+                            .to_string());
+                    }
+                    in_quotes = true;
+                } else {
+                    // Closing quote
+                    in_quotes = false;
+                    just_closed_quote = true; // now we require whitespace or end-of-input
                 }
             }
-            _ => current.push(ch),
+
+            '\\' if in_quotes => {
+                // Allow escapes inside quotes: \" and \\ (you can add more if you want)
+                match it.peek().copied() {
+                    Some('"') => {
+                        it.next();
+                        current.push('"');
+                    }
+                    Some('\\') => {
+                        it.next();
+                        current.push('\\');
+                    }
+                    _ => {
+                        // If you want to allow unknown escapes, you could just push '\\' here instead.
+                        return Err("Invalid escape sequence in quotes. Use \\\" for a quote or \\\\ for a backslash."
+                            .to_string());
+                    }
+                }
+                just_closed_quote = false;
+            }
+
+            c if c.is_whitespace() && !in_quotes => {
+                // Whitespace ends a token
+                if just_closed_quote {
+                    // whitespace after a quoted token is fine; finalize below
+                    just_closed_quote = false;
+                }
+
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+
+            _ => {
+                // If we just closed a quote, only whitespace or end-of-input is allowed next.
+                if just_closed_quote {
+                    return Err("Characters found immediately after a closing quote. Add whitespace after the quoted string."
+                        .to_string());
+                }
+                current.push(ch);
+            }
         }
     }
 
     if in_quotes {
-        return  Err("Unclosed quote (\") in input".to_string());
+        return Err("Unclosed quote (\") in input".to_string());
     }
 
-    if !current.is_empty() {
+    // Final token push (also handles quoted tokens at end-of-input)
+    if !current.is_empty() || just_closed_quote {
+        // `just_closed_quote` allows:  ""   -> empty token
         tokens.push(current);
     }
 
     Ok(tokens)
 }
+
 
 
 fn parse_create(tokens: &[String]) -> Result<Command, String> {
