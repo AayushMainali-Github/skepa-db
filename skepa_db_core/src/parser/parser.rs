@@ -1,9 +1,9 @@
 use crate::parser::command::Command;
 use crate::types::datatype::{DataType, parse_datatype};
 
-pub fn parse(input: &str) -> Result<Command, String>{
+pub fn parse(input: &str) -> Result<Command, String> {
     let tokens = tokenize(input)?;
-    if tokens.is_empty(){
+    if tokens.is_empty() {
         return Err("Empty command".to_string());
     }
 
@@ -16,7 +16,6 @@ pub fn parse(input: &str) -> Result<Command, String>{
         _ => Err(format!("Unknown command '{}'", tokens[0])),
     }
 }
-
 
 fn tokenize(input: &str) -> Result<Vec<String>, String> {
     let mut tokens: Vec<String> = Vec::new();
@@ -31,8 +30,10 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
             '"' => {
                 if just_closed_quote {
                     // Something like:  "a""b"  (no whitespace between)
-                    return Err("Unexpected quote after closing quote. Add whitespace between tokens."
-                        .to_string());
+                    return Err(
+                        "Unexpected quote after closing quote. Add whitespace between tokens."
+                            .to_string(),
+                    );
                 }
 
                 if !in_quotes {
@@ -70,10 +71,11 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
             }
 
             c if c.is_whitespace() && !in_quotes => {
-                // Whitespace ends a token
+                // If we just closed a quote, finalize the token EVEN IF it's empty ("")
                 if just_closed_quote {
-                    // whitespace after a quoted token is fine; finalize below
+                    tokens.push(std::mem::take(&mut current)); // pushes "" too
                     just_closed_quote = false;
+                    continue;
                 }
 
                 if !current.is_empty() {
@@ -105,8 +107,6 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
     Ok(tokens)
 }
 
-
-
 fn parse_create(tokens: &[String]) -> Result<Command, String> {
     // create <table> <col>:<type> <col>:<type> ...
     if tokens.len() < 3 {
@@ -120,7 +120,10 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
         cols.push((name, dtype));
     }
 
-    Ok(Command::Create { table, columns: cols })
+    Ok(Command::Create {
+        table,
+        columns: cols,
+    })
 }
 
 fn parse_insert(tokens: &[String]) -> Result<Command, String> {
@@ -151,7 +154,9 @@ fn parse_col_def(s: &str) -> Result<(String, DataType), String> {
     let dtype = parts.next().unwrap_or("").trim();
 
     if name.is_empty() || dtype.is_empty() {
-        return Err(format!("Bad column definition '{s}'. Use name:type like id:int"));
+        return Err(format!(
+            "Bad column definition '{s}'. Use name:type like id:int"
+        ));
     }
 
     Ok((name.to_string(), parse_datatype(dtype)?))
