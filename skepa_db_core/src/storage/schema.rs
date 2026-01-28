@@ -1,0 +1,26 @@
+use crate::types::datatype::DataType;
+
+/// Represents a single column in a table schema
+#[derive(Debug, Clone)]
+pub struct Column {
+    pub name: String,
+    pub dtype: DataType,
+}
+
+/// Represents the schema of a table (list of columns)
+#[derive(Debug, Clone)]
+pub struct Schema {
+    pub columns: Vec<Column>,
+}
+
+impl Schema {
+    /// Creates a new schema from a list of column definitions
+    pub fn new(columns: Vec<Column>) -> Self {
+        Self { columns }
+    }
+
+    /// Returns the number of columns in this schema
+    pub fn column_count(&self) -> usize {
+        self.columns.len()
+    }
+}
