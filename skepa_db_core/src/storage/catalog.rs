@@ -1,4 +1,7 @@
+use std::fs;
+use std::path::Path;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 use crate::types::datatype::DataType;
 use crate::storage::schema::{Schema, Column};
 
@@ -6,6 +9,17 @@ use crate::storage::schema::{Schema, Column};
 #[derive(Debug)]
 pub struct Catalog {
     tables: HashMap<String, Schema>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CatalogFile {
+    tables: HashMap<String, Vec<ColumnFile>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ColumnFile {
+    name: String,
+    dtype: String,
 }
 
 impl Catalog {
@@ -48,5 +62,72 @@ impl Catalog {
         self.tables
             .get(table)
             .ok_or_else(|| format!("Table '{}' does not exist", table))
+    }
+
+    /// Returns cloned table names and schemas for bootstrapping storage.
+    pub fn snapshot_tables(&self) -> Vec<(String, Schema)> {
+        self.tables
+            .iter()
+            .map(|(name, schema)| (name.clone(), schema.clone()))
+            .collect()
+    }
+
+    /// Saves catalog metadata to disk.
+    pub fn save_to_path(&self, path: &Path) -> Result<(), String> {
+        let mut tables: HashMap<String, Vec<ColumnFile>> = HashMap::new();
+        for (table, schema) in &self.tables {
+            let cols: Vec<ColumnFile> = schema
+                .columns
+                .iter()
+                .map(|c| {
+                    let dtype = match c.dtype {
+                        DataType::Int => "int".to_string(),
+                        DataType::Text => "text".to_string(),
+                    };
+                    ColumnFile {
+                        name: c.name.clone(),
+                        dtype,
+                    }
+                })
+                .collect();
+            tables.insert(table.clone(), cols);
+        }
+
+        let payload = serde_json::to_string_pretty(&CatalogFile { tables })
+            .map_err(|e| format!("Failed to serialize catalog as JSON: {e}"))?;
+        fs::write(path, payload).map_err(|e| format!("Failed to write catalog file: {e}"))
+    }
+
+    /// Loads catalog metadata from disk.
+    pub fn load_from_path(path: &Path) -> Result<Self, String> {
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("Failed to read catalog file: {e}"))?;
+        if content.trim().is_empty() {
+            return Ok(Self::new());
+        }
+
+        let file: CatalogFile = serde_json::from_str(&content)
+            .map_err(|e| format!("Malformed catalog JSON: {e}"))?;
+        let mut tables: HashMap<String, Schema> = HashMap::new();
+        for (table, cols) in file.tables {
+            let mut columns: Vec<Column> = Vec::new();
+            for c in cols {
+                let dtype = match c.dtype.to_lowercase().as_str() {
+                    "int" => DataType::Int,
+                    "text" => DataType::Text,
+                    other => return Err(format!("Unknown type '{other}' in catalog")),
+                };
+                columns.push(Column {
+                    name: c.name,
+                    dtype,
+                });
+            }
+            tables.insert(table, Schema::new(columns));
+        }
+
+        Ok(Self { tables })
     }
 }

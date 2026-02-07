@@ -7,3 +7,10 @@ Cargo.lock
 .DS_Store
 .idea/
 .vscode/
+
+# Local DB runtime data
+/mydb/
+/test_db/
+**/catalog.json
+**/wal.log
+**/tables/*.rows
