@@ -13,6 +13,13 @@
 - **Syntax**: insert <table> <val> <val> ...
 - **Example**: insert users 1 "Alice" 30
 
+## Update
+- Updates one or more columns for rows that match a WHERE condition.
+- **Syntax**: update <table> set <col> <value> [<col> <value> ...] where <column> <operator> <value>
+- **Examples**:
+  - update users set name "Ravi" where id = 1
+  - update users set name "Ravi" age 25 where id eq 1
+
 ## Select
 - Retrieves rows (all columns with `*`, or specific columns with comma list).
 - **Syntax**: select <col1,col2|*> from <table>
