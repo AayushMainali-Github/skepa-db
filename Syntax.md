@@ -17,6 +17,13 @@
   - `update users set name = "Ravi" where id = 1`
   - `update users set name = "Ravi", age = 25 where id eq 1`
 
+## Delete
+- Deletes rows matching a WHERE condition.
+- **Syntax**: `delete from <table> where <column> <operator> <value>`
+- **Examples**:
+  - `delete from users where id = 1`
+  - `delete from users where name like "r?m"`
+
 ## Select
 - Retrieves all or selected columns.
 - **Syntax**: `select <col1,col2|*> from <table> [where <column> <operator> <value>]`
