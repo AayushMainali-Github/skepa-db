@@ -42,4 +42,10 @@ impl StorageEngine for MemStorage {
             .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?;
         Ok(rows.as_slice())
     }
+
+    fn scan_mut(&mut self, table: &str) -> Result<&mut Vec<Row>, String> {
+        self.tables
+            .get_mut(table)
+            .ok_or_else(|| format!("Table '{}' does not exist in storage", table))
+    }
 }

@@ -11,4 +11,7 @@ pub trait StorageEngine {
 
     /// Scans all rows from the specified table
     fn scan(&self, table: &str) -> Result<&[Row], String>;
+
+    /// Mutable access to all rows for in-place updates
+    fn scan_mut(&mut self, table: &str) -> Result<&mut Vec<Row>, String>;
 }

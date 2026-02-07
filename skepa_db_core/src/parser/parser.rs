@@ -1,4 +1,4 @@
-use crate::parser::command::{Command, CompareOp, WhereClause};
+use crate::parser::command::{Assignment, Command, CompareOp, WhereClause};
 use crate::types::datatype::{DataType, parse_datatype};
 
 pub fn parse(input: &str) -> Result<Command, String> {
@@ -12,6 +12,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
     match keyword.as_str() {
         "create" => parse_create(&tokens),
         "insert" => parse_insert(&tokens),
+        "update" => parse_update(&tokens),
         "select" => parse_select(&tokens),
         _ => Err(format!("Unknown command '{}'", tokens[0])),
     }
@@ -124,6 +125,69 @@ fn parse_insert(tokens: &[String]) -> Result<Command, String> {
     let values = tokens[2..].to_vec();
 
     Ok(Command::Insert { table, values })
+}
+
+fn parse_update(tokens: &[String]) -> Result<Command, String> {
+    // update <table> set <col> <val> [<col> <val> ...] where <col> <op> <val>
+    if tokens.len() < 9 {
+        return Err(
+            "Usage: update <table> set <col> <value> [<col> <value> ...] where <column> <op> <value>"
+                .to_string(),
+        );
+    }
+
+    let table = tokens[1].clone();
+    if !tokens[2].eq_ignore_ascii_case("set") {
+        return Err(
+            "Usage: update <table> set <col> <value> [<col> <value> ...] where <column> <op> <value>"
+                .to_string(),
+        );
+    }
+
+    let where_idx = tokens
+        .iter()
+        .position(|t| t.eq_ignore_ascii_case("where"))
+        .ok_or_else(|| {
+            "Usage: update <table> set <col> <value> [<col> <value> ...] where <column> <op> <value>"
+                .to_string()
+        })?;
+
+    if where_idx <= 3 {
+        return Err("UPDATE requires at least one assignment after SET".to_string());
+    }
+
+    let set_tokens = &tokens[3..where_idx];
+    if set_tokens.len() % 2 != 0 {
+        return Err("Bad UPDATE assignments. Use pairs: <col> <value>".to_string());
+    }
+
+    let mut assignments: Vec<Assignment> = Vec::new();
+    let mut i = 0usize;
+    while i < set_tokens.len() {
+        assignments.push(Assignment {
+            column: set_tokens[i].clone(),
+            value: set_tokens[i + 1].clone(),
+        });
+        i += 2;
+    }
+
+    let where_tokens = &tokens[where_idx + 1..];
+    if where_tokens.len() != 3 {
+        return Err("Bad UPDATE WHERE clause. Use: where <column> <op> <value>".to_string());
+    }
+
+    let op = parse_compare_op(&where_tokens[1])?;
+    let filter = WhereClause {
+        column: where_tokens[0].clone(),
+        op,
+        value: where_tokens[2].clone(),
+    };
+
+    Ok(Command::Update {
+        table,
+        assignments,
+        filter,
+    })
 }
 
 fn parse_select(tokens: &[String]) -> Result<Command, String> {

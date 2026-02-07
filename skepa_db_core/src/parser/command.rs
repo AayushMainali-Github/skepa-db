@@ -17,6 +17,12 @@ pub struct WhereClause {
     pub value: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Assignment {
+    pub column: String,
+    pub value: String,
+}
+
 #[derive(Debug)]
 pub enum Command {
     Create {
@@ -27,6 +33,12 @@ pub enum Command {
     Insert {
         table: String,
         values: Vec<String>,
+    },
+
+    Update {
+        table: String,
+        assignments: Vec<Assignment>,
+        filter: WhereClause,
     },
 
     Select {

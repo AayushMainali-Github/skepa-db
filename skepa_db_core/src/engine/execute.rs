@@ -1,5 +1,5 @@
 use crate::engine::format::format_select;
-use crate::parser::command::{Command, CompareOp, WhereClause};
+use crate::parser::command::{Assignment, Command, CompareOp, WhereClause};
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, Value};
@@ -14,6 +14,11 @@ pub fn execute_command(
     match cmd {
         Command::Create { table, columns } => handle_create(table, columns, catalog, storage),
         Command::Insert { table, values } => handle_insert(table, values, catalog, storage),
+        Command::Update {
+            table,
+            assignments,
+            filter,
+        } => handle_update(table, assignments, filter, catalog, storage),
         Command::Select {
             table,
             columns,
@@ -78,6 +83,55 @@ fn handle_select(
 
     let (out_schema, out_rows) = project_rows(schema, &filtered_rows, columns.as_ref())?;
     Ok(format_select(&out_schema, &out_rows))
+}
+
+fn handle_update(
+    table: String,
+    assignments: Vec<Assignment>,
+    filter: WhereClause,
+    catalog: &mut Catalog,
+    storage: &mut dyn StorageEngine,
+) -> Result<String, String> {
+    let schema = catalog.schema(&table)?;
+
+    let mut compiled: Vec<(usize, Value)> = Vec::new();
+    for a in assignments {
+        let idx = schema
+            .columns
+            .iter()
+            .position(|c| c.name == a.column)
+            .ok_or_else(|| format!("Unknown column '{}' in UPDATE", a.column))?;
+        let dtype = &schema.columns[idx].dtype;
+        let parsed = parse_value(dtype, &a.value)?;
+        compiled.push((idx, parsed));
+    }
+
+    let where_idx = schema
+        .columns
+        .iter()
+        .position(|c| c.name == filter.column)
+        .ok_or_else(|| format!("Unknown column '{}' in WHERE", filter.column))?;
+    let where_dtype = &schema.columns[where_idx].dtype;
+
+    let rows = storage.scan_mut(&table)?;
+    let mut updated = 0usize;
+
+    for row in rows.iter_mut() {
+        let cell = row
+            .get(where_idx)
+            .ok_or_else(|| format!("Row is missing value for column '{}'", filter.column))?;
+
+        if matches_where(cell, where_dtype, &filter.op, &filter.value)? {
+            for (idx, new_value) in &compiled {
+                if let Some(slot) = row.get_mut(*idx) {
+                    *slot = new_value.clone();
+                }
+            }
+            updated += 1;
+        }
+    }
+
+    Ok(format!("updated {} row(s) in {}", updated, table))
 }
 
 fn project_rows(
