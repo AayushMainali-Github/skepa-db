@@ -14,14 +14,25 @@
 - **Example**: insert users 1 "Alice" 30
 
 ## Select
-- Retrieves rows from the specified table.
-- **Syntax**: select <table>
-- **Example**: select users
+- Retrieves rows (all columns with `*`, or specific columns with comma list).
+- **Syntax**: select <col1,col2|*> from <table>
+- **Examples**:
+  - select * from users
+  - select id,name from users
+
+## Select Specific Columns
+- Retrieves only selected columns.
+- **Syntax**: select <col1,col2|*> from <table>
+- **Examples**:
+  - select id,name from users
+  - select * from users
 
 ## Select With Where
 - Filters rows using a single WHERE condition.
-- **Syntax**: select <table> where <column> <operator> <value>
-- **Example**: select users where age gte 18
+- **Syntax**: select <col1,col2|*> from <table> where <column> <operator> <value>
+- **Examples**:
+  - select * from users where age gte 18
+  - select name from users where age gte 18
 
 ### WHERE Operators
 - Equality (int/text): `=` or `eq`
