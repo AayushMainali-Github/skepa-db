@@ -11,7 +11,7 @@ fn test_create_table() {
 fn test_create_and_select_empty() {
     let mut db = Database::open("./test_db");
     db.execute("create users id:int name:text").unwrap();
-    let result = db.execute("select users").unwrap();
+    let result = db.execute("select * from users").unwrap();
 
     assert_eq!(result, "id\tname");
 }
@@ -25,7 +25,7 @@ fn test_create_insert_select() {
     let insert_result = db.execute(r#"insert users 1 "ram""#).unwrap();
     assert_eq!(insert_result, "inserted 1 row into users");
 
-    let select_result = db.execute("select users").unwrap();
+    let select_result = db.execute("select * from users").unwrap();
     assert_eq!(select_result, "id\tname\n1\tram");
 }
 
@@ -37,7 +37,7 @@ fn test_insert_multiple_rows() {
     db.execute(r#"insert users 1 "ram""#).unwrap();
     db.execute(r#"insert users 2 "alice""#).unwrap();
 
-    let result = db.execute("select users").unwrap();
+    let result = db.execute("select * from users").unwrap();
     assert_eq!(result, "id\tname\n1\tram\n2\talice");
 }
 
@@ -79,7 +79,7 @@ fn test_insert_type_mismatch_int() {
 fn test_select_from_missing_table() {
     let mut db = Database::open("./test_db");
 
-    let result = db.execute("select nonexistent");
+    let result = db.execute("select * from nonexistent");
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(err.contains("does not exist"));
@@ -107,10 +107,10 @@ fn test_multiple_tables() {
     db.execute(r#"insert users 1 "ram""#).unwrap();
     db.execute(r#"insert products "laptop" 1000"#).unwrap();
 
-    let users = db.execute("select users").unwrap();
+    let users = db.execute("select * from users").unwrap();
     assert_eq!(users, "id\tname\n1\tram");
 
-    let products = db.execute("select products").unwrap();
+    let products = db.execute("select * from products").unwrap();
     assert_eq!(products, "name\tprice\nlaptop\t1000");
 }
 
@@ -121,7 +121,7 @@ fn test_empty_string_text_value() {
     db.execute("create users id:int name:text").unwrap();
     db.execute(r#"insert users 1 """#).unwrap();
 
-    let result = db.execute("select users").unwrap();
+    let result = db.execute("select * from users").unwrap();
     assert_eq!(result, "id\tname\n1\t");
 }
 
@@ -132,7 +132,7 @@ fn test_text_with_spaces() {
     db.execute("create users id:int name:text").unwrap();
     db.execute(r#"insert users 1 "ram kumar""#).unwrap();
 
-    let result = db.execute("select users").unwrap();
+    let result = db.execute("select * from users").unwrap();
     assert_eq!(result, "id\tname\n1\tram kumar");
 }
 
@@ -143,7 +143,7 @@ fn test_negative_integers() {
     db.execute("create temps id:int value:int").unwrap();
     db.execute("insert temps 1 -10").unwrap();
 
-    let result = db.execute("select temps").unwrap();
+    let result = db.execute("select * from temps").unwrap();
     assert_eq!(result, "id\tvalue\n1\t-10");
 }
 
@@ -154,7 +154,7 @@ fn test_large_integers() {
     db.execute("create nums id:int value:int").unwrap();
     db.execute("insert nums 1 999999999").unwrap();
 
-    let result = db.execute("select nums").unwrap();
+    let result = db.execute("select * from nums").unwrap();
     assert_eq!(result, "id\tvalue\n1\t999999999");
 }
 
@@ -166,7 +166,7 @@ fn test_select_where_eq_int() {
     db.execute(r#"insert users 1 "ram" 20"#).unwrap();
     db.execute(r#"insert users 2 "alice" 30"#).unwrap();
 
-    let result = db.execute("select users where age = 30").unwrap();
+    let result = db.execute("select * from users where age = 30").unwrap();
     assert_eq!(result, "id\tname\tage\n2\talice\t30");
 }
 
@@ -178,7 +178,7 @@ fn test_select_where_eq_text() {
     db.execute(r#"insert users 1 "ram""#).unwrap();
     db.execute(r#"insert users 2 "alice""#).unwrap();
 
-    let result = db.execute(r#"select users where name eq "ram""#).unwrap();
+    let result = db.execute(r#"select * from users where name eq "ram""#).unwrap();
     assert_eq!(result, "id\tname\n1\tram");
 }
 
@@ -192,19 +192,19 @@ fn test_select_where_gt_lt_gte_lte() {
     db.execute("insert nums 3 30").unwrap();
 
     assert_eq!(
-        db.execute("select nums where value gt 20").unwrap(),
+        db.execute("select * from nums where value gt 20").unwrap(),
         "id\tvalue\n3\t30"
     );
     assert_eq!(
-        db.execute("select nums where value < 20").unwrap(),
+        db.execute("select * from nums where value < 20").unwrap(),
         "id\tvalue\n1\t10"
     );
     assert_eq!(
-        db.execute("select nums where value gte 20").unwrap(),
+        db.execute("select * from nums where value gte 20").unwrap(),
         "id\tvalue\n2\t20\n3\t30"
     );
     assert_eq!(
-        db.execute("select nums where value <= 20").unwrap(),
+        db.execute("select * from nums where value <= 20").unwrap(),
         "id\tvalue\n1\t10\n2\t20"
     );
 }
@@ -219,15 +219,15 @@ fn test_select_where_like_patterns() {
     db.execute(r#"insert users 3 "amir""#).unwrap();
 
     assert_eq!(
-        db.execute(r#"select users where name like "ra*""#).unwrap(),
+        db.execute(r#"select * from users where name like "ra*""#).unwrap(),
         "id\tname\n1\tram\n2\travi"
     );
     assert_eq!(
-        db.execute(r#"select users where name like "*ir""#).unwrap(),
+        db.execute(r#"select * from users where name like "*ir""#).unwrap(),
         "id\tname\n3\tamir"
     );
     assert_eq!(
-        db.execute(r#"select users where name like "*av*""#).unwrap(),
+        db.execute(r#"select * from users where name like "*av*""#).unwrap(),
         "id\tname\n2\travi"
     );
 }
@@ -242,15 +242,15 @@ fn test_select_where_like_single_char_wildcard() {
     db.execute(r#"insert users 3 "ravi""#).unwrap();
 
     assert_eq!(
-        db.execute(r#"select users where name like "r?m""#).unwrap(),
+        db.execute(r#"select * from users where name like "r?m""#).unwrap(),
         "id\tname\n1\tram\n2\trom"
     );
     assert_eq!(
-        db.execute(r#"select users where name like "??vi""#).unwrap(),
+        db.execute(r#"select * from users where name like "??vi""#).unwrap(),
         "id\tname\n3\travi"
     );
     assert_eq!(
-        db.execute(r#"select users where name like "r??""#).unwrap(),
+        db.execute(r#"select * from users where name like "r??""#).unwrap(),
         "id\tname\n1\tram\n2\trom"
     );
 }
@@ -260,7 +260,7 @@ fn test_select_where_unknown_column_errors() {
     let mut db = Database::open("./test_db");
 
     db.execute("create users id:int name:text").unwrap();
-    let result = db.execute("select users where age = 10");
+    let result = db.execute("select * from users where age = 10");
     assert!(result.is_err());
     assert!(result.unwrap_err().to_lowercase().contains("unknown column"));
 }
@@ -272,7 +272,7 @@ fn test_select_where_text_comparison_with_gt_errors() {
     db.execute("create users id:int name:text").unwrap();
     db.execute(r#"insert users 1 "ram""#).unwrap();
 
-    let result = db.execute("select users where name gt 1");
+    let result = db.execute("select * from users where name gt 1");
     assert!(result.is_err());
     assert!(result.unwrap_err().to_lowercase().contains("only valid for int"));
 }
@@ -284,8 +284,61 @@ fn test_select_where_like_on_int_errors() {
     db.execute("create users id:int age:int").unwrap();
     db.execute("insert users 1 20").unwrap();
 
-    let result = db.execute(r#"select users where age like "2*""#);
+    let result = db.execute(r#"select * from users where age like "2*""#);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_lowercase().contains("only valid for text"));
+}
+
+#[test]
+fn test_select_specific_columns() {
+    let mut db = Database::open("./test_db");
+
+    db.execute("create users id:int name:text age:int").unwrap();
+    db.execute(r#"insert users 1 "ram" 20"#).unwrap();
+    db.execute(r#"insert users 2 "alice" 30"#).unwrap();
+
+    let result = db.execute("select id,name from users").unwrap();
+    assert_eq!(result, "id\tname\n1\tram\n2\talice");
+}
+
+#[test]
+fn test_select_specific_columns_with_where() {
+    let mut db = Database::open("./test_db");
+
+    db.execute("create users id:int name:text age:int").unwrap();
+    db.execute(r#"insert users 1 "ram" 20"#).unwrap();
+    db.execute(r#"insert users 2 "alice" 30"#).unwrap();
+
+    let result = db.execute("select name from users where age gte 30").unwrap();
+    assert_eq!(result, "name\nalice");
+}
+
+#[test]
+fn test_select_star_from_with_where() {
+    let mut db = Database::open("./test_db");
+
+    db.execute("create users id:int name:text age:int").unwrap();
+    db.execute(r#"insert users 1 "ram" 20"#).unwrap();
+    db.execute(r#"insert users 2 "alice" 30"#).unwrap();
+
+    let result = db.execute("select * from users where age > 20").unwrap();
+    assert_eq!(result, "id\tname\tage\n2\talice\t30");
+}
+
+#[test]
+fn test_select_unknown_projected_column_errors() {
+    let mut db = Database::open("./test_db");
+
+    db.execute("create users id:int name:text").unwrap();
+    db.execute(r#"insert users 1 "ram""#).unwrap();
+
+    let result = db.execute("select id,age from users");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_lowercase()
+            .contains("unknown column 'age' in select list")
+    );
 }
 

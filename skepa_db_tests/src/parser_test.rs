@@ -34,11 +34,16 @@ fn parse_insert_with_quotes() {
 
 #[test]
 fn parse_select_basic() {
-    let cmd = parse("select users").unwrap();
+    let cmd = parse("select * from users").unwrap();
 
     match cmd {
-        Command::Select { table, filter } => {
+        Command::Select {
+            table,
+            columns,
+            filter,
+        } => {
             assert_eq!(table, "users");
+            assert_eq!(columns.unwrap(), Vec::<String>::new());
             assert!(filter.is_none());
         }
         _ => panic!("Expected Select command"),
@@ -47,11 +52,16 @@ fn parse_select_basic() {
 
 #[test]
 fn parse_select_where_eq() {
-    let cmd = parse(r#"select users where name = "ram""#).unwrap();
+    let cmd = parse(r#"select * from users where name = "ram""#).unwrap();
 
     match cmd {
-        Command::Select { table, filter } => {
+        Command::Select {
+            table,
+            columns,
+            filter,
+        } => {
             assert_eq!(table, "users");
+            assert_eq!(columns.unwrap(), Vec::<String>::new());
             let f = filter.expect("expected where clause");
             assert_eq!(f.column, "name");
             assert_eq!(f.op, CompareOp::Eq);
@@ -63,7 +73,7 @@ fn parse_select_where_eq() {
 
 #[test]
 fn parse_select_where_keyword_operator() {
-    let cmd = parse("select users where age gte 18").unwrap();
+    let cmd = parse("select * from users where age gte 18").unwrap();
 
     match cmd {
         Command::Select { filter, .. } => {
@@ -78,7 +88,7 @@ fn parse_select_where_keyword_operator() {
 
 #[test]
 fn parse_select_where_like() {
-    let cmd = parse(r#"select users where name like "ra*""#).unwrap();
+    let cmd = parse(r#"select * from users where name like "ra*""#).unwrap();
 
     match cmd {
         Command::Select { filter, .. } => {
@@ -86,6 +96,63 @@ fn parse_select_where_like() {
             assert_eq!(f.column, "name");
             assert_eq!(f.op, CompareOp::Like);
             assert_eq!(f.value, "ra*");
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_projection_basic() {
+    let cmd = parse("select id,name from users").unwrap();
+
+    match cmd {
+        Command::Select {
+            table,
+            columns,
+            filter,
+        } => {
+            assert_eq!(table, "users");
+            assert_eq!(columns.unwrap(), vec!["id".to_string(), "name".to_string()]);
+            assert!(filter.is_none());
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_projection_with_where() {
+    let cmd = parse(r#"select id,name from users where name like "ra*""#).unwrap();
+
+    match cmd {
+        Command::Select {
+            table,
+            columns,
+            filter,
+        } => {
+            assert_eq!(table, "users");
+            assert_eq!(columns.unwrap(), vec!["id".to_string(), "name".to_string()]);
+            let f = filter.expect("expected where clause");
+            assert_eq!(f.column, "name");
+            assert_eq!(f.op, CompareOp::Like);
+            assert_eq!(f.value, "ra*");
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_star_from_table() {
+    let cmd = parse("select * from users").unwrap();
+
+    match cmd {
+        Command::Select {
+            table,
+            columns,
+            filter,
+        } => {
+            assert_eq!(table, "users");
+            assert_eq!(columns.unwrap(), Vec::<String>::new());
+            assert!(filter.is_none());
         }
         _ => panic!("Expected Select command"),
     }
@@ -190,13 +257,19 @@ fn create_rejects_unknown_datatype() {
 
 #[test]
 fn select_with_extra_tokens_errors() {
-    let err = parse("select users now").unwrap_err();
+    let err = parse("select * users now").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: select"));
+}
+
+#[test]
+fn select_projection_missing_from_errors() {
+    let err = parse("select id,name users").unwrap_err();
     assert!(err.to_lowercase().contains("usage: select"));
 }
 
 #[test]
 fn select_with_bad_where_operator_errors() {
-    let err = parse("select users where age between 1").unwrap_err();
+    let err = parse("select * from users where age between 1").unwrap_err();
     assert!(err.to_lowercase().contains("unknown where operator"));
 }
 
