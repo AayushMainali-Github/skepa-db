@@ -1,15 +1,25 @@
 use skepa_db_core::Database;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+fn test_db() -> Database {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_test_{}_{}", std::process::id(), id));
+    let _ = std::fs::remove_dir_all(&path);
+    Database::open(path)
+}
 #[test]
 fn test_create_table() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     let result = db.execute("create table users (id int, name text)").unwrap();
     assert_eq!(result, "created table users");
 }
 
 #[test]
 fn test_create_and_select_empty() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     let result = db.execute("select * from users").unwrap();
     assert_eq!(result, "id\tname");
@@ -17,7 +27,7 @@ fn test_create_and_select_empty() {
 
 #[test]
 fn test_create_insert_select() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
 
     let insert_result = db.execute(r#"insert into users values (1, "ram")"#).unwrap();
@@ -29,7 +39,7 @@ fn test_create_insert_select() {
 
 #[test]
 fn test_insert_multiple_rows() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
     db.execute(r#"insert into users values (2, "alice")"#).unwrap();
@@ -40,7 +50,7 @@ fn test_insert_multiple_rows() {
 
 #[test]
 fn test_insert_into_missing_table() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     let result = db.execute(r#"insert into users values (1, "ram")"#);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("does not exist"));
@@ -48,7 +58,7 @@ fn test_insert_into_missing_table() {
 
 #[test]
 fn test_insert_wrong_value_count() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
 
     let result = db.execute(r#"insert into users values (1, "ram", "extra")"#);
@@ -58,7 +68,7 @@ fn test_insert_wrong_value_count() {
 
 #[test]
 fn test_insert_type_mismatch_int() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
 
     let result = db.execute(r#"insert into users values ("abc", "ram")"#);
@@ -68,7 +78,7 @@ fn test_insert_type_mismatch_int() {
 
 #[test]
 fn test_select_from_missing_table() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     let result = db.execute("select * from nonexistent");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("does not exist"));
@@ -76,7 +86,7 @@ fn test_select_from_missing_table() {
 
 #[test]
 fn test_create_duplicate_table() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
 
     let result = db.execute("create table users (id int, name text)");
@@ -86,7 +96,7 @@ fn test_create_duplicate_table() {
 
 #[test]
 fn test_multiple_tables() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute("create table products (name text, price int)").unwrap();
 
@@ -102,7 +112,7 @@ fn test_multiple_tables() {
 
 #[test]
 fn test_empty_string_text_value() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "")"#).unwrap();
 
@@ -112,7 +122,7 @@ fn test_empty_string_text_value() {
 
 #[test]
 fn test_text_with_spaces() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram kumar")"#).unwrap();
 
@@ -122,7 +132,7 @@ fn test_text_with_spaces() {
 
 #[test]
 fn test_negative_integers() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table temps (id int, value int)").unwrap();
     db.execute("insert into temps values (1, -10)").unwrap();
 
@@ -132,7 +142,7 @@ fn test_negative_integers() {
 
 #[test]
 fn test_large_integers() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table nums (id int, value int)").unwrap();
     db.execute("insert into nums values (1, 999999999)").unwrap();
 
@@ -142,7 +152,7 @@ fn test_large_integers() {
 
 #[test]
 fn test_select_where_eq_int() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text, age int)").unwrap();
     db.execute(r#"insert into users values (1, "ram", 20)"#).unwrap();
     db.execute(r#"insert into users values (2, "alice", 30)"#).unwrap();
@@ -153,7 +163,7 @@ fn test_select_where_eq_int() {
 
 #[test]
 fn test_select_where_eq_text() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
     db.execute(r#"insert into users values (2, "alice")"#).unwrap();
@@ -164,7 +174,7 @@ fn test_select_where_eq_text() {
 
 #[test]
 fn test_select_where_gt_lt_gte_lte() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table nums (id int, value int)").unwrap();
     db.execute("insert into nums values (1, 10)").unwrap();
     db.execute("insert into nums values (2, 20)").unwrap();
@@ -178,7 +188,7 @@ fn test_select_where_gt_lt_gte_lte() {
 
 #[test]
 fn test_select_where_like_patterns() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
     db.execute(r#"insert into users values (2, "ravi")"#).unwrap();
@@ -191,7 +201,7 @@ fn test_select_where_like_patterns() {
 
 #[test]
 fn test_select_where_like_single_char_wildcard() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
     db.execute(r#"insert into users values (2, "rom")"#).unwrap();
@@ -204,7 +214,7 @@ fn test_select_where_like_single_char_wildcard() {
 
 #[test]
 fn test_select_where_unknown_column_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     let result = db.execute("select * from users where age = 10");
     assert!(result.is_err());
@@ -213,7 +223,7 @@ fn test_select_where_unknown_column_errors() {
 
 #[test]
 fn test_select_where_text_comparison_with_gt_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
 
@@ -224,7 +234,7 @@ fn test_select_where_text_comparison_with_gt_errors() {
 
 #[test]
 fn test_select_where_like_on_int_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, age int)").unwrap();
     db.execute("insert into users values (1, 20)").unwrap();
 
@@ -235,7 +245,7 @@ fn test_select_where_like_on_int_errors() {
 
 #[test]
 fn test_select_specific_columns() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text, age int)").unwrap();
     db.execute(r#"insert into users values (1, "ram", 20)"#).unwrap();
     db.execute(r#"insert into users values (2, "alice", 30)"#).unwrap();
@@ -246,7 +256,7 @@ fn test_select_specific_columns() {
 
 #[test]
 fn test_select_specific_columns_with_where() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text, age int)").unwrap();
     db.execute(r#"insert into users values (1, "ram", 20)"#).unwrap();
     db.execute(r#"insert into users values (2, "alice", 30)"#).unwrap();
@@ -257,7 +267,7 @@ fn test_select_specific_columns_with_where() {
 
 #[test]
 fn test_select_star_from_with_where() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text, age int)").unwrap();
     db.execute(r#"insert into users values (1, "ram", 20)"#).unwrap();
     db.execute(r#"insert into users values (2, "alice", 30)"#).unwrap();
@@ -268,7 +278,7 @@ fn test_select_star_from_with_where() {
 
 #[test]
 fn test_select_unknown_projected_column_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
 
@@ -279,7 +289,7 @@ fn test_select_unknown_projected_column_errors() {
 
 #[test]
 fn test_update_single_column_where_eq() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text, age int)").unwrap();
     db.execute(r#"insert into users values (1, "ram", 20)"#).unwrap();
     db.execute(r#"insert into users values (2, "alice", 30)"#).unwrap();
@@ -293,7 +303,7 @@ fn test_update_single_column_where_eq() {
 
 #[test]
 fn test_update_multiple_columns() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text, age int)").unwrap();
     db.execute(r#"insert into users values (1, "ram", 20)"#).unwrap();
 
@@ -306,7 +316,7 @@ fn test_update_multiple_columns() {
 
 #[test]
 fn test_update_where_like() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text, age int)").unwrap();
     db.execute(r#"insert into users values (1, "ram", 20)"#).unwrap();
     db.execute(r#"insert into users values (2, "rom", 30)"#).unwrap();
@@ -321,7 +331,7 @@ fn test_update_where_like() {
 
 #[test]
 fn test_update_unknown_set_column_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
 
@@ -332,7 +342,7 @@ fn test_update_unknown_set_column_errors() {
 
 #[test]
 fn test_update_type_mismatch_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text, age int)").unwrap();
     db.execute(r#"insert into users values (1, "ram", 20)"#).unwrap();
 
@@ -343,7 +353,7 @@ fn test_update_type_mismatch_errors() {
 
 #[test]
 fn test_delete_where_eq() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
     db.execute(r#"insert into users values (2, "alice")"#).unwrap();
@@ -357,7 +367,7 @@ fn test_delete_where_eq() {
 
 #[test]
 fn test_delete_where_like() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
     db.execute(r#"insert into users values (2, "rom")"#).unwrap();
@@ -372,7 +382,7 @@ fn test_delete_where_like() {
 
 #[test]
 fn test_delete_unknown_column_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
 
@@ -383,7 +393,7 @@ fn test_delete_unknown_column_errors() {
 
 #[test]
 fn test_delete_no_match_returns_zero() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
 
@@ -393,7 +403,7 @@ fn test_delete_no_match_returns_zero() {
 
 #[test]
 fn test_delete_numeric_gt() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table nums (id int, v int)").unwrap();
     db.execute("insert into nums values (1, 10)").unwrap();
     db.execute("insert into nums values (2, 20)").unwrap();
@@ -406,7 +416,7 @@ fn test_delete_numeric_gt() {
 
 #[test]
 fn test_delete_numeric_lte() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table nums (id int, v int)").unwrap();
     db.execute("insert into nums values (1, 10)").unwrap();
     db.execute("insert into nums values (2, 20)").unwrap();
@@ -419,7 +429,7 @@ fn test_delete_numeric_lte() {
 
 #[test]
 fn test_delete_like_star_removes_all_rows() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
     db.execute(r#"insert into users values (2, "alice")"#).unwrap();
@@ -431,7 +441,7 @@ fn test_delete_like_star_removes_all_rows() {
 
 #[test]
 fn test_delete_like_question_single_char() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "a")"#).unwrap();
     db.execute(r#"insert into users values (2, "bb")"#).unwrap();
@@ -443,7 +453,7 @@ fn test_delete_like_question_single_char() {
 
 #[test]
 fn test_delete_text_with_gt_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
 
@@ -454,7 +464,7 @@ fn test_delete_text_with_gt_errors() {
 
 #[test]
 fn test_update_no_match_returns_zero() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, age int)").unwrap();
     db.execute("insert into users values (1, 20)").unwrap();
 
@@ -464,7 +474,7 @@ fn test_update_no_match_returns_zero() {
 
 #[test]
 fn test_update_unknown_where_column_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, age int)").unwrap();
     db.execute("insert into users values (1, 20)").unwrap();
 
@@ -475,7 +485,7 @@ fn test_update_unknown_where_column_errors() {
 
 #[test]
 fn test_update_where_like_on_int_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, age int)").unwrap();
     db.execute("insert into users values (1, 20)").unwrap();
 
@@ -486,7 +496,7 @@ fn test_update_where_like_on_int_errors() {
 
 #[test]
 fn test_update_changes_multiple_rows_with_numeric_predicate() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table nums (id int, v int)").unwrap();
     db.execute("insert into nums values (1, 10)").unwrap();
     db.execute("insert into nums values (2, 20)").unwrap();
@@ -499,7 +509,7 @@ fn test_update_changes_multiple_rows_with_numeric_predicate() {
 
 #[test]
 fn test_update_can_set_text_empty_string() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
 
@@ -510,7 +520,7 @@ fn test_update_can_set_text_empty_string() {
 
 #[test]
 fn test_select_projection_with_spaces_after_comma() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
 
@@ -520,7 +530,7 @@ fn test_select_projection_with_spaces_after_comma() {
 
 #[test]
 fn test_select_projection_duplicate_columns() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
 
@@ -530,7 +540,7 @@ fn test_select_projection_duplicate_columns() {
 
 #[test]
 fn test_select_like_exact_match_without_wildcard() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
     db.execute(r#"insert into users values (2, "ramesh")"#).unwrap();
@@ -541,7 +551,7 @@ fn test_select_like_exact_match_without_wildcard() {
 
 #[test]
 fn test_select_like_star_matches_all() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "ram")"#).unwrap();
     db.execute(r#"insert into users values (2, "alice")"#).unwrap();
@@ -552,7 +562,7 @@ fn test_select_like_star_matches_all() {
 
 #[test]
 fn test_select_like_question_matches_single_char_only() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     db.execute(r#"insert into users values (1, "a")"#).unwrap();
     db.execute(r#"insert into users values (2, "ab")"#).unwrap();
@@ -563,7 +573,7 @@ fn test_select_like_question_matches_single_char_only() {
 
 #[test]
 fn test_select_on_empty_table_with_where_keeps_header() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
     let out = db.execute(r#"select * from users where name like "*""#).unwrap();
     assert_eq!(out, "id\tname");
@@ -571,7 +581,7 @@ fn test_select_on_empty_table_with_where_keeps_header() {
 
 #[test]
 fn test_delete_from_missing_table_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     let result = db.execute("delete from users where id = 1");
     assert!(result.is_err());
     assert!(result.unwrap_err().to_lowercase().contains("does not exist"));
@@ -579,8 +589,54 @@ fn test_delete_from_missing_table_errors() {
 
 #[test]
 fn test_update_missing_table_errors() {
-    let mut db = Database::open("./test_db");
+    let mut db = test_db();
     let result = db.execute("update users set id = 1 where id = 1");
     assert!(result.is_err());
     assert!(result.unwrap_err().to_lowercase().contains("does not exist"));
 }
+
+#[test]
+fn test_persistence_reopen_insert() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_persist_{}_insert", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int, name text)").unwrap();
+        db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    }
+
+    {
+        let mut db = Database::open(path.clone());
+        let out = db.execute("select * from users").unwrap();
+        assert_eq!(out, "id\tname\n1\tram");
+    }
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_persistence_reopen_update_delete() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_persist_{}_ud", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int, name text, age int)").unwrap();
+        db.execute(r#"insert into users values (1, "ram", 20)"#).unwrap();
+        db.execute(r#"insert into users values (2, "alice", 30)"#).unwrap();
+        db.execute(r#"update users set age = 99 where id = 1"#).unwrap();
+        db.execute(r#"delete from users where name = "alice""#).unwrap();
+    }
+
+    {
+        let mut db = Database::open(path.clone());
+        let out = db.execute("select * from users").unwrap();
+        assert_eq!(out, "id\tname\tage\n1\tram\t99");
+    }
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
