@@ -4,7 +4,7 @@ use skepa_db_core::types::datatype::DataType;
 
 #[test]
 fn parse_create_basic() {
-    let cmd = parse(r#"create users id:int name:text"#).unwrap();
+    let cmd = parse(r#"create table users (id int, name text)"#).unwrap();
 
     match cmd {
         Command::Create { table, columns } => {
@@ -21,7 +21,7 @@ fn parse_create_basic() {
 
 #[test]
 fn parse_insert_with_quotes() {
-    let cmd = parse(r#"insert users 1 "ram kumar""#).unwrap();
+    let cmd = parse(r#"insert into users values (1, "ram kumar")"#).unwrap();
 
     match cmd {
         Command::Insert { table, values } => {
@@ -103,7 +103,7 @@ fn parse_select_where_like() {
 
 #[test]
 fn parse_update_basic() {
-    let cmd = parse(r#"update users set name "ravi" where id = 1"#).unwrap();
+    let cmd = parse(r#"update users set name = "ravi" where id = 1"#).unwrap();
 
     match cmd {
         Command::Update {
@@ -125,7 +125,7 @@ fn parse_update_basic() {
 
 #[test]
 fn parse_update_multiple_assignments() {
-    let cmd = parse(r#"update users set name "ravi" age 30 where id eq 1"#).unwrap();
+    let cmd = parse(r#"update users set name = "ravi", age = 30 where id eq 1"#).unwrap();
 
     match cmd {
         Command::Update { assignments, .. } => {
@@ -210,19 +210,19 @@ fn parse_unknown_command_errors() {
 
 #[test]
 fn parse_bad_column_def_errors() {
-    let err = parse("create users id name:text").unwrap_err();
-    assert!(err.to_lowercase().contains("bad column"));
+    let err = parse("create table users (id text bad)").unwrap_err();
+    assert!(err.to_lowercase().contains("bad create"));
 }
 
 #[test]
 fn parse_unclosed_quote_errors() {
-    let err = parse(r#"insert users 1 "ram"#).unwrap_err();
+    let err = parse(r#"insert into users values (1, "ram"#).unwrap_err();
     assert!(err.to_lowercase().contains("unclosed quote"));
 }
 
 #[test]
 fn parse_insert_empty_string_value_allowed() {
-    let cmd = parse(r#"insert users 1 "" "#).unwrap();
+    let cmd = parse(r#"insert into users values (1, "")"#).unwrap();
 
     match cmd {
         Command::Insert { table, values } => {
@@ -235,7 +235,7 @@ fn parse_insert_empty_string_value_allowed() {
 
 #[test]
 fn tokenize_allows_escaped_quote_inside_quotes() {
-    let cmd = parse(r#"insert users 1 "ra\"m""#).unwrap();
+    let cmd = parse(r#"insert into users values (1, "ra\"m")"#).unwrap();
 
     match cmd {
         Command::Insert { values, .. } => {
@@ -247,7 +247,7 @@ fn tokenize_allows_escaped_quote_inside_quotes() {
 
 #[test]
 fn tokenize_allows_escaped_backslash_inside_quotes() {
-    let cmd = parse(r#"insert users 1 "path\\to\\file""#).unwrap();
+    let cmd = parse(r#"insert into users values (1, "path\\to\\file")"#).unwrap();
 
     match cmd {
         Command::Insert { values, .. } => {
@@ -259,13 +259,13 @@ fn tokenize_allows_escaped_backslash_inside_quotes() {
 
 #[test]
 fn tokenize_rejects_unknown_escape_inside_quotes() {
-    let err = parse(r#"insert users 1 "hello\nworld""#).unwrap_err();
+    let err = parse(r#"insert into users values (1, "hello\nworld")"#).unwrap_err();
     assert!(err.to_lowercase().contains("invalid escape"));
 }
 
 #[test]
 fn tokenize_rejects_quote_in_middle_of_token() {
-    let err = parse(r#"insert users 1 aa"aa"aa"#).unwrap_err();
+    let err = parse(r#"insert into users values (1, aa"aa"aa)"#).unwrap_err();
     assert!(
         err.to_lowercase().contains("cannot start in the middle")
             || err.to_lowercase().contains("characters found immediately")
@@ -274,19 +274,19 @@ fn tokenize_rejects_quote_in_middle_of_token() {
 
 #[test]
 fn tokenize_rejects_characters_after_closing_quote() {
-    let err = parse(r#"insert users 1 "ram"kumar"#).unwrap_err();
+    let err = parse(r#"insert into users values (1, "ram"kumar)"#).unwrap_err();
     assert!(err.to_lowercase().contains("after a closing quote"));
 }
 
 #[test]
 fn tokenize_rejects_adjacent_quoted_tokens_without_space() {
-    let err = parse(r#"insert users 1 "a""b""#).unwrap_err();
+    let err = parse(r#"insert into users values (1, "a""b")"#).unwrap_err();
     assert!(err.to_lowercase().contains("unexpected quote after closing quote"));
 }
 
 #[test]
 fn create_rejects_unknown_datatype() {
-    let err = parse("create users id:integer name:text").unwrap_err();
+    let err = parse("create table users (id integer, name text)").unwrap_err();
     assert!(
         err.to_lowercase().contains("unknown type")
             || err.to_lowercase().contains("use int|text")
@@ -313,24 +313,24 @@ fn select_with_bad_where_operator_errors() {
 
 #[test]
 fn insert_missing_values_errors() {
-    let err = parse("insert users").unwrap_err();
+    let err = parse("insert into users values").unwrap_err();
     assert!(err.to_lowercase().contains("usage: insert"));
 }
 
 #[test]
 fn update_missing_where_errors() {
-    let err = parse(r#"update users set name "ravi""#).unwrap_err();
+    let err = parse(r#"update users set name = "ravi""#).unwrap_err();
     assert!(err.to_lowercase().contains("usage: update"));
 }
 
 #[test]
 fn update_bad_assignment_pairs_errors() {
-    let err = parse(r#"update users set name "ravi" age where id = 1"#).unwrap_err();
-    assert!(err.to_lowercase().contains("pairs"));
+    let err = parse(r#"update users set name = "ravi", age where id = 1"#).unwrap_err();
+    assert!(err.to_lowercase().contains("bad update assignments"));
 }
 
 #[test]
 fn create_missing_columns_errors() {
-    let err = parse("create users").unwrap_err();
+    let err = parse("create table users").unwrap_err();
     assert!(err.to_lowercase().contains("usage: create"));
 }
