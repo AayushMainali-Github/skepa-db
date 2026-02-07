@@ -340,3 +340,43 @@ fn test_update_type_mismatch_errors() {
     assert!(result.is_err());
     assert!(result.unwrap_err().to_lowercase().contains("expected int"));
 }
+
+#[test]
+fn test_delete_where_eq() {
+    let mut db = Database::open("./test_db");
+    db.execute("create table users (id int, name text)").unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    db.execute(r#"insert into users values (2, "alice")"#).unwrap();
+
+    let out = db.execute("delete from users where id = 1").unwrap();
+    assert_eq!(out, "deleted 1 row(s) from users");
+
+    let result = db.execute("select * from users").unwrap();
+    assert_eq!(result, "id\tname\n2\talice");
+}
+
+#[test]
+fn test_delete_where_like() {
+    let mut db = Database::open("./test_db");
+    db.execute("create table users (id int, name text)").unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    db.execute(r#"insert into users values (2, "rom")"#).unwrap();
+    db.execute(r#"insert into users values (3, "alice")"#).unwrap();
+
+    let out = db.execute(r#"delete from users where name like "r?m""#).unwrap();
+    assert_eq!(out, "deleted 2 row(s) from users");
+
+    let result = db.execute("select * from users").unwrap();
+    assert_eq!(result, "id\tname\n3\talice");
+}
+
+#[test]
+fn test_delete_unknown_column_errors() {
+    let mut db = Database::open("./test_db");
+    db.execute("create table users (id int, name text)").unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+
+    let result = db.execute("delete from users where age = 10");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_lowercase().contains("unknown column"));
+}

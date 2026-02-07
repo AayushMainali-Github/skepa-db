@@ -140,6 +140,21 @@ fn parse_update_multiple_assignments() {
 }
 
 #[test]
+fn parse_delete_basic() {
+    let cmd = parse(r#"delete from users where id = 1"#).unwrap();
+
+    match cmd {
+        Command::Delete { table, filter } => {
+            assert_eq!(table, "users");
+            assert_eq!(filter.column, "id");
+            assert_eq!(filter.op, CompareOp::Eq);
+            assert_eq!(filter.value, "1");
+        }
+        _ => panic!("Expected Delete command"),
+    }
+}
+
+#[test]
 fn parse_select_projection_basic() {
     let cmd = parse("select id,name from users").unwrap();
 
@@ -321,6 +336,12 @@ fn insert_missing_values_errors() {
 fn update_missing_where_errors() {
     let err = parse(r#"update users set name = "ravi""#).unwrap_err();
     assert!(err.to_lowercase().contains("usage: update"));
+}
+
+#[test]
+fn delete_missing_where_errors() {
+    let err = parse(r#"delete from users"#).unwrap_err();
+    assert!(err.to_lowercase().contains("usage: delete"));
 }
 
 #[test]
