@@ -41,6 +41,11 @@ pub enum Command {
         filter: WhereClause,
     },
 
+    Delete {
+        table: String,
+        filter: WhereClause,
+    },
+
     Select {
         table: String,
         columns: Option<Vec<String>>,

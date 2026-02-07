@@ -19,6 +19,7 @@ pub fn execute_command(
             assignments,
             filter,
         } => handle_update(table, assignments, filter, catalog, storage),
+        Command::Delete { table, filter } => handle_delete(table, filter, catalog, storage),
         Command::Select {
             table,
             columns,
@@ -134,6 +135,42 @@ fn handle_update(
     Ok(format!("updated {} row(s) in {}", updated, table))
 }
 
+fn handle_delete(
+    table: String,
+    filter: WhereClause,
+    catalog: &mut Catalog,
+    storage: &mut dyn StorageEngine,
+) -> Result<String, String> {
+    let schema = catalog.schema(&table)?;
+    let where_idx = schema
+        .columns
+        .iter()
+        .position(|c| c.name == filter.column)
+        .ok_or_else(|| format!("Unknown column '{}' in WHERE", filter.column))?;
+    let where_dtype = &schema.columns[where_idx].dtype;
+
+    let rows = storage.scan_mut(&table)?;
+
+    let mut keep_flags: Vec<bool> = Vec::with_capacity(rows.len());
+    for row in rows.iter() {
+        let should_delete = row_matches(row, where_idx, &filter.column, where_dtype, &filter.op, &filter.value)?;
+        keep_flags.push(!should_delete);
+    }
+
+    let mut deleted = 0usize;
+    let mut kept: Vec<Row> = Vec::with_capacity(rows.len());
+    for (row, keep) in rows.drain(..).zip(keep_flags) {
+        if keep {
+            kept.push(row);
+        } else {
+            deleted += 1;
+        }
+    }
+    *rows = kept;
+
+    Ok(format!("deleted {} row(s) from {}", deleted, table))
+}
+
 fn project_rows(
     schema: &Schema,
     rows: &[Row],
@@ -186,16 +223,33 @@ fn filter_rows(
     let mut filtered: Vec<Row> = Vec::new();
 
     for row in rows {
-        let cell = row
-            .get(col_idx)
-            .ok_or_else(|| format!("Row is missing value for column '{}'", where_clause.column))?;
-
-        if matches_where(cell, col_dtype, &where_clause.op, &where_clause.value)? {
+        if row_matches(
+            row,
+            col_idx,
+            &where_clause.column,
+            col_dtype,
+            &where_clause.op,
+            &where_clause.value,
+        )? {
             filtered.push(row.clone());
         }
     }
 
     Ok(filtered)
+}
+
+fn row_matches(
+    row: &Row,
+    col_idx: usize,
+    col_name: &str,
+    col_dtype: &DataType,
+    op: &CompareOp,
+    rhs_token: &str,
+) -> Result<bool, String> {
+    let cell = row
+        .get(col_idx)
+        .ok_or_else(|| format!("Row is missing value for column '{}'", col_name))?;
+    matches_where(cell, col_dtype, op, rhs_token)
 }
 
 fn matches_where(cell: &Value, dtype: &DataType, op: &CompareOp, rhs_token: &str) -> Result<bool, String> {

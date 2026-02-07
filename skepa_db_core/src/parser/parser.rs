@@ -13,6 +13,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "create" => parse_create(&tokens),
         "insert" => parse_insert(&tokens),
         "update" => parse_update(&tokens),
+        "delete" => parse_delete(&tokens),
         "select" => parse_select(&tokens),
         _ => Err(format!("Unknown command '{}'", tokens[0])),
     }
@@ -273,6 +274,26 @@ fn parse_update(tokens: &[String]) -> Result<Command, String> {
         table,
         assignments,
         filter,
+    })
+}
+
+fn parse_delete(tokens: &[String]) -> Result<Command, String> {
+    // delete from <table> where <column> <op> <value>
+    if tokens.len() != 7
+        || !tokens[1].eq_ignore_ascii_case("from")
+        || !tokens[3].eq_ignore_ascii_case("where")
+    {
+        return Err("Usage: delete from <table> where <column> <op> <value>".to_string());
+    }
+
+    let op = parse_compare_op(&tokens[5])?;
+    Ok(Command::Delete {
+        table: tokens[2].clone(),
+        filter: WhereClause {
+            column: tokens[4].clone(),
+            op,
+            value: tokens[6].clone(),
+        },
     })
 }
 
