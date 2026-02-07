@@ -158,6 +158,9 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
                 return Err("Bad CREATE column list. Columns must be comma-separated.".to_string());
             }
             i += 1;
+            if i >= end {
+                return Err("Bad CREATE column list. Trailing comma is not allowed.".to_string());
+            }
         }
     }
 
