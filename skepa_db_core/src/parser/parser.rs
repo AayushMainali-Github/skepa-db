@@ -1,4 +1,4 @@
-use crate::parser::command::Command;
+use crate::parser::command::{Command, CompareOp, WhereClause};
 use crate::types::datatype::{DataType, parse_datatype};
 
 pub fn parse(input: &str) -> Result<Command, String> {
@@ -29,7 +29,6 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
         match ch {
             '"' => {
                 if just_closed_quote {
-                    // Something like:  "a""b"  (no whitespace between)
                     return Err(
                         "Unexpected quote after closing quote. Add whitespace between tokens."
                             .to_string(),
@@ -37,21 +36,18 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
                 }
 
                 if !in_quotes {
-                    // Opening quote must start a new token
                     if !current.is_empty() {
                         return Err("Quote (\") cannot start in the middle of a token. Add whitespace before the quote."
                             .to_string());
                     }
                     in_quotes = true;
                 } else {
-                    // Closing quote
                     in_quotes = false;
-                    just_closed_quote = true; // now we require whitespace or end-of-input
+                    just_closed_quote = true;
                 }
             }
 
             '\\' if in_quotes => {
-                // Allow escapes inside quotes: \" and \\ (you can add more if you want)
                 match it.peek().copied() {
                     Some('"') => {
                         it.next();
@@ -62,7 +58,6 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
                         current.push('\\');
                     }
                     _ => {
-                        // If you want to allow unknown escapes, you could just push '\\' here instead.
                         return Err("Invalid escape sequence in quotes. Use \\\" for a quote or \\\\ for a backslash."
                             .to_string());
                     }
@@ -71,9 +66,8 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
             }
 
             c if c.is_whitespace() && !in_quotes => {
-                // If we just closed a quote, finalize the token EVEN IF it's empty ("")
                 if just_closed_quote {
-                    tokens.push(std::mem::take(&mut current)); // pushes "" too
+                    tokens.push(std::mem::take(&mut current));
                     just_closed_quote = false;
                     continue;
                 }
@@ -84,7 +78,6 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
             }
 
             _ => {
-                // If we just closed a quote, only whitespace or end-of-input is allowed next.
                 if just_closed_quote {
                     return Err("Characters found immediately after a closing quote. Add whitespace after the quoted string."
                         .to_string());
@@ -98,9 +91,7 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
         return Err("Unclosed quote (\") in input".to_string());
     }
 
-    // Final token push (also handles quoted tokens at end-of-input)
     if !current.is_empty() || just_closed_quote {
-        // `just_closed_quote` allows:  ""   -> empty token
         tokens.push(current);
     }
 
@@ -108,7 +99,6 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
 }
 
 fn parse_create(tokens: &[String]) -> Result<Command, String> {
-    // create <table> <col>:<type> <col>:<type> ...
     if tokens.len() < 3 {
         return Err("Usage: create <table> <col>:<type> ...".to_string());
     }
@@ -127,7 +117,6 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
 }
 
 fn parse_insert(tokens: &[String]) -> Result<Command, String> {
-    // insert <table> <v1> <v2> ...
     if tokens.len() < 3 {
         return Err("Usage: insert <table> <v1> <v2> ...".to_string());
     }
@@ -138,17 +127,52 @@ fn parse_insert(tokens: &[String]) -> Result<Command, String> {
 }
 
 fn parse_select(tokens: &[String]) -> Result<Command, String> {
-    // select <table>
-    if tokens.len() != 2 {
-        return Err("Usage: select <table>".to_string());
+    if tokens.len() == 2 {
+        return Ok(Command::Select {
+            table: tokens[1].clone(),
+            filter: None,
+        });
     }
+
+    if tokens.len() != 6 {
+        return Err(
+            "Usage: select <table> [where <column> <op> <value>]".to_string(),
+        );
+    }
+
+    if !tokens[2].eq_ignore_ascii_case("where") {
+        return Err(
+            "Usage: select <table> [where <column> <op> <value>]".to_string(),
+        );
+    }
+
+    let op = parse_compare_op(&tokens[4])?;
+
     Ok(Command::Select {
         table: tokens[1].clone(),
+        filter: Some(WhereClause {
+            column: tokens[3].clone(),
+            op,
+            value: tokens[5].clone(),
+        }),
     })
 }
 
+fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
+    match raw.to_lowercase().as_str() {
+        "=" | "eq" => Ok(CompareOp::Eq),
+        ">" | "gt" => Ok(CompareOp::Gt),
+        "<" | "lt" => Ok(CompareOp::Lt),
+        ">=" | "gte" => Ok(CompareOp::Gte),
+        "<=" | "lte" => Ok(CompareOp::Lte),
+        "like" => Ok(CompareOp::Like),
+        _ => Err(format!(
+            "Unknown WHERE operator '{raw}'. Use =|eq|>|gt|<|lt|>=|gte|<=|lte|like"
+        )),
+    }
+}
+
 fn parse_col_def(s: &str) -> Result<(String, DataType), String> {
-    // "id:int" -> ("id", Int)
     let mut parts = s.splitn(2, ':');
     let name = parts.next().unwrap_or("").trim();
     let dtype = parts.next().unwrap_or("").trim();
