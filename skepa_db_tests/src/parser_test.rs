@@ -355,3 +355,184 @@ fn create_missing_columns_errors() {
     let err = parse("create table users").unwrap_err();
     assert!(err.to_lowercase().contains("usage: create"));
 }
+
+#[test]
+fn create_requires_table_keyword() {
+    let err = parse("create users (id int)").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: create"));
+}
+
+#[test]
+fn create_requires_parentheses() {
+    let err = parse("create table users id int").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: create"));
+}
+
+#[test]
+fn create_requires_commas_between_columns() {
+    let err = parse("create table users (id int name text)").unwrap_err();
+    assert!(err.to_lowercase().contains("comma"));
+}
+
+#[test]
+fn create_trailing_comma_errors() {
+    let err = parse("create table users (id int,)").unwrap_err();
+    assert!(err.to_lowercase().contains("bad create"));
+}
+
+#[test]
+fn insert_requires_into_keyword() {
+    let err = parse(r#"insert users values (1, "ram")"#).unwrap_err();
+    assert!(err.to_lowercase().contains("usage: insert"));
+}
+
+#[test]
+fn insert_requires_values_keyword() {
+    let err = parse(r#"insert into users (1, "ram")"#).unwrap_err();
+    assert!(err.to_lowercase().contains("usage: insert"));
+}
+
+#[test]
+fn insert_requires_parentheses() {
+    let err = parse(r#"insert into users values 1, "ram""#).unwrap_err();
+    assert!(err.to_lowercase().contains("usage: insert"));
+}
+
+#[test]
+fn insert_requires_commas_between_values() {
+    let err = parse(r#"insert into users values (1 "ram")"#).unwrap_err();
+    assert!(err.to_lowercase().contains("comma"));
+}
+
+#[test]
+fn insert_allows_no_spaces_around_commas() {
+    let cmd = parse(r#"insert into users values(1,"ram")"#).unwrap();
+    match cmd {
+        Command::Insert { table, values } => {
+            assert_eq!(table, "users");
+            assert_eq!(values, vec!["1".to_string(), "ram".to_string()]);
+        }
+        _ => panic!("Expected Insert command"),
+    }
+}
+
+#[test]
+fn select_requires_from_keyword() {
+    let err = parse("select id,name users").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: select"));
+}
+
+#[test]
+fn select_column_list_trailing_comma_errors() {
+    let err = parse("select id, from users").unwrap_err();
+    assert!(err.to_lowercase().contains("column list"));
+}
+
+#[test]
+fn select_column_list_double_comma_errors() {
+    let err = parse("select id,,name from users").unwrap_err();
+    assert!(err.to_lowercase().contains("column list"));
+}
+
+#[test]
+fn select_requires_table_after_from() {
+    let err = parse("select * from").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: select") || err.to_lowercase().contains("missing table"));
+}
+
+#[test]
+fn select_where_too_many_tokens_errors() {
+    let err = parse("select * from users where id = 1 extra").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: select"));
+}
+
+#[test]
+fn select_supports_no_spaces_around_comma_in_projection() {
+    let cmd = parse("select id,name,age from users").unwrap();
+    match cmd {
+        Command::Select { columns, .. } => {
+            assert_eq!(
+                columns.unwrap(),
+                vec!["id".to_string(), "name".to_string(), "age".to_string()]
+            );
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn update_requires_set_keyword() {
+    let err = parse(r#"update users name = "ravi" where id = 1"#).unwrap_err();
+    assert!(err.to_lowercase().contains("usage: update"));
+}
+
+#[test]
+fn update_requires_equals_in_assignment() {
+    let err = parse(r#"update users set name "ravi" where id = 1"#).unwrap_err();
+    assert!(
+        err.to_lowercase().contains("bad update assignments")
+            || err.to_lowercase().contains("usage: update")
+    );
+}
+
+#[test]
+fn update_requires_commas_between_assignments() {
+    let err = parse(r#"update users set name = "ravi" age = 20 where id = 1"#).unwrap_err();
+    assert!(err.to_lowercase().contains("comma"));
+}
+
+#[test]
+fn update_where_requires_three_tokens() {
+    let err = parse(r#"update users set name = "ravi" where id = 1 x"#).unwrap_err();
+    assert!(err.to_lowercase().contains("where"));
+}
+
+#[test]
+fn update_supports_no_spaces_around_equals() {
+    let cmd = parse(r#"update users set age=20 where id=1"#).unwrap();
+    match cmd {
+        Command::Update { assignments, filter, .. } => {
+            assert_eq!(assignments[0].column, "age");
+            assert_eq!(assignments[0].value, "20");
+            assert_eq!(filter.column, "id");
+            assert_eq!(filter.value, "1");
+        }
+        _ => panic!("Expected Update command"),
+    }
+}
+
+#[test]
+fn delete_requires_from_keyword() {
+    let err = parse("delete users where id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: delete"));
+}
+
+#[test]
+fn delete_requires_where_keyword() {
+    let err = parse("delete from users id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: delete"));
+}
+
+#[test]
+fn delete_rejects_unknown_operator() {
+    let err = parse("delete from users where id between 1").unwrap_err();
+    assert!(err.to_lowercase().contains("unknown where operator"));
+}
+
+#[test]
+fn where_not_equal_not_supported() {
+    let err = parse("select * from users where id != 1").unwrap_err();
+    assert!(err.to_lowercase().contains("not supported"));
+}
+
+#[test]
+fn tokenizer_handles_parentheses_without_spaces() {
+    let cmd = parse("create table u(id int,name text)").unwrap();
+    match cmd {
+        Command::Create { table, columns } => {
+            assert_eq!(table, "u");
+            assert_eq!(columns.len(), 2);
+        }
+        _ => panic!("Expected Create command"),
+    }
+}
