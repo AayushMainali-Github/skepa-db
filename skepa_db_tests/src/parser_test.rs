@@ -1,5 +1,5 @@
+use skepa_db_core::parser::command::{Command, CompareOp};
 use skepa_db_core::parser::parser::parse;
-use skepa_db_core::parser::command::Command;
 use skepa_db_core::types::datatype::DataType;
 
 #[test]
@@ -37,7 +37,56 @@ fn parse_select_basic() {
     let cmd = parse("select users").unwrap();
 
     match cmd {
-        Command::Select { table } => assert_eq!(table, "users"),
+        Command::Select { table, filter } => {
+            assert_eq!(table, "users");
+            assert!(filter.is_none());
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_where_eq() {
+    let cmd = parse(r#"select users where name = "ram""#).unwrap();
+
+    match cmd {
+        Command::Select { table, filter } => {
+            assert_eq!(table, "users");
+            let f = filter.expect("expected where clause");
+            assert_eq!(f.column, "name");
+            assert_eq!(f.op, CompareOp::Eq);
+            assert_eq!(f.value, "ram");
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_where_keyword_operator() {
+    let cmd = parse("select users where age gte 18").unwrap();
+
+    match cmd {
+        Command::Select { filter, .. } => {
+            let f = filter.expect("expected where clause");
+            assert_eq!(f.column, "age");
+            assert_eq!(f.op, CompareOp::Gte);
+            assert_eq!(f.value, "18");
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_where_like() {
+    let cmd = parse(r#"select users where name like "ra*""#).unwrap();
+
+    match cmd {
+        Command::Select { filter, .. } => {
+            let f = filter.expect("expected where clause");
+            assert_eq!(f.column, "name");
+            assert_eq!(f.op, CompareOp::Like);
+            assert_eq!(f.value, "ra*");
+        }
         _ => panic!("Expected Select command"),
     }
 }
@@ -68,7 +117,6 @@ fn parse_unclosed_quote_errors() {
 
 #[test]
 fn parse_insert_empty_string_value_allowed() {
-    // "" should produce an empty token for the text column
     let cmd = parse(r#"insert users 1 "" "#).unwrap();
 
     match cmd {
@@ -82,7 +130,6 @@ fn parse_insert_empty_string_value_allowed() {
 
 #[test]
 fn tokenize_allows_escaped_quote_inside_quotes() {
-    // \" should become a literal "
     let cmd = parse(r#"insert users 1 "ra\"m""#).unwrap();
 
     match cmd {
@@ -95,7 +142,6 @@ fn tokenize_allows_escaped_quote_inside_quotes() {
 
 #[test]
 fn tokenize_allows_escaped_backslash_inside_quotes() {
-    // \\ should become a literal \
     let cmd = parse(r#"insert users 1 "path\\to\\file""#).unwrap();
 
     match cmd {
@@ -108,14 +154,12 @@ fn tokenize_allows_escaped_backslash_inside_quotes() {
 
 #[test]
 fn tokenize_rejects_unknown_escape_inside_quotes() {
-    // \n is NOT allowed in your tokenizer (only \" and \\)
     let err = parse(r#"insert users 1 "hello\nworld""#).unwrap_err();
     assert!(err.to_lowercase().contains("invalid escape"));
 }
 
 #[test]
 fn tokenize_rejects_quote_in_middle_of_token() {
-    // aa"aa"aa should error per your rule
     let err = parse(r#"insert users 1 aa"aa"aa"#).unwrap_err();
     assert!(
         err.to_lowercase().contains("cannot start in the middle")
@@ -125,14 +169,12 @@ fn tokenize_rejects_quote_in_middle_of_token() {
 
 #[test]
 fn tokenize_rejects_characters_after_closing_quote() {
-    // "ram"kumar should error (needs whitespace)
     let err = parse(r#"insert users 1 "ram"kumar"#).unwrap_err();
     assert!(err.to_lowercase().contains("after a closing quote"));
 }
 
 #[test]
 fn tokenize_rejects_adjacent_quoted_tokens_without_space() {
-    // "a""b" should error because after closing quote next quote appears immediately
     let err = parse(r#"insert users 1 "a""b""#).unwrap_err();
     assert!(err.to_lowercase().contains("unexpected quote after closing quote"));
 }
@@ -150,6 +192,12 @@ fn create_rejects_unknown_datatype() {
 fn select_with_extra_tokens_errors() {
     let err = parse("select users now").unwrap_err();
     assert!(err.to_lowercase().contains("usage: select"));
+}
+
+#[test]
+fn select_with_bad_where_operator_errors() {
+    let err = parse("select users where age between 1").unwrap_err();
+    assert!(err.to_lowercase().contains("unknown where operator"));
 }
 
 #[test]
