@@ -342,3 +342,78 @@ fn test_select_unknown_projected_column_errors() {
     );
 }
 
+#[test]
+fn test_update_single_column_where_eq() {
+    let mut db = Database::open("./test_db");
+
+    db.execute("create users id:int name:text age:int").unwrap();
+    db.execute(r#"insert users 1 "ram" 20"#).unwrap();
+    db.execute(r#"insert users 2 "alice" 30"#).unwrap();
+
+    let out = db
+        .execute(r#"update users set name "ravi" where id = 1"#)
+        .unwrap();
+    assert_eq!(out, "updated 1 row(s) in users");
+
+    let result = db.execute("select * from users").unwrap();
+    assert_eq!(result, "id\tname\tage\n1\travi\t20\n2\talice\t30");
+}
+
+#[test]
+fn test_update_multiple_columns() {
+    let mut db = Database::open("./test_db");
+
+    db.execute("create users id:int name:text age:int").unwrap();
+    db.execute(r#"insert users 1 "ram" 20"#).unwrap();
+
+    let out = db
+        .execute(r#"update users set name "ravi" age 25 where id eq 1"#)
+        .unwrap();
+    assert_eq!(out, "updated 1 row(s) in users");
+
+    let result = db.execute("select * from users").unwrap();
+    assert_eq!(result, "id\tname\tage\n1\travi\t25");
+}
+
+#[test]
+fn test_update_where_like() {
+    let mut db = Database::open("./test_db");
+
+    db.execute("create users id:int name:text age:int").unwrap();
+    db.execute(r#"insert users 1 "ram" 20"#).unwrap();
+    db.execute(r#"insert users 2 "rom" 30"#).unwrap();
+    db.execute(r#"insert users 3 "alice" 40"#).unwrap();
+
+    let out = db
+        .execute(r#"update users set age 99 where name like "r?m""#)
+        .unwrap();
+    assert_eq!(out, "updated 2 row(s) in users");
+
+    let result = db.execute("select * from users").unwrap();
+    assert_eq!(result, "id\tname\tage\n1\tram\t99\n2\trom\t99\n3\talice\t40");
+}
+
+#[test]
+fn test_update_unknown_set_column_errors() {
+    let mut db = Database::open("./test_db");
+
+    db.execute("create users id:int name:text").unwrap();
+    db.execute(r#"insert users 1 "ram""#).unwrap();
+
+    let result = db.execute(r#"update users set age 20 where id = 1"#);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_lowercase().contains("unknown column 'age' in update"));
+}
+
+#[test]
+fn test_update_type_mismatch_errors() {
+    let mut db = Database::open("./test_db");
+
+    db.execute("create users id:int name:text age:int").unwrap();
+    db.execute(r#"insert users 1 "ram" 20"#).unwrap();
+
+    let result = db.execute(r#"update users set age "bad" where id = 1"#);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_lowercase().contains("expected int"));
+}
+

@@ -102,6 +102,44 @@ fn parse_select_where_like() {
 }
 
 #[test]
+fn parse_update_basic() {
+    let cmd = parse(r#"update users set name "ravi" where id = 1"#).unwrap();
+
+    match cmd {
+        Command::Update {
+            table,
+            assignments,
+            filter,
+        } => {
+            assert_eq!(table, "users");
+            assert_eq!(assignments.len(), 1);
+            assert_eq!(assignments[0].column, "name");
+            assert_eq!(assignments[0].value, "ravi");
+            assert_eq!(filter.column, "id");
+            assert_eq!(filter.op, CompareOp::Eq);
+            assert_eq!(filter.value, "1");
+        }
+        _ => panic!("Expected Update command"),
+    }
+}
+
+#[test]
+fn parse_update_multiple_assignments() {
+    let cmd = parse(r#"update users set name "ravi" age 30 where id eq 1"#).unwrap();
+
+    match cmd {
+        Command::Update { assignments, .. } => {
+            assert_eq!(assignments.len(), 2);
+            assert_eq!(assignments[0].column, "name");
+            assert_eq!(assignments[0].value, "ravi");
+            assert_eq!(assignments[1].column, "age");
+            assert_eq!(assignments[1].value, "30");
+        }
+        _ => panic!("Expected Update command"),
+    }
+}
+
+#[test]
 fn parse_select_projection_basic() {
     let cmd = parse("select id,name from users").unwrap();
 
@@ -277,6 +315,18 @@ fn select_with_bad_where_operator_errors() {
 fn insert_missing_values_errors() {
     let err = parse("insert users").unwrap_err();
     assert!(err.to_lowercase().contains("usage: insert"));
+}
+
+#[test]
+fn update_missing_where_errors() {
+    let err = parse(r#"update users set name "ravi""#).unwrap_err();
+    assert!(err.to_lowercase().contains("usage: update"));
+}
+
+#[test]
+fn update_bad_assignment_pairs_errors() {
+    let err = parse(r#"update users set name "ravi" age where id = 1"#).unwrap_err();
+    assert!(err.to_lowercase().contains("pairs"));
 }
 
 #[test]
