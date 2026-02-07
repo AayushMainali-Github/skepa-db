@@ -1,6 +1,6 @@
 use crate::engine::format::format_select;
 use crate::parser::command::{Command, CompareOp, WhereClause};
-use crate::storage::{Catalog, StorageEngine};
+use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, Value};
 use crate::types::Row;
@@ -14,7 +14,11 @@ pub fn execute_command(
     match cmd {
         Command::Create { table, columns } => handle_create(table, columns, catalog, storage),
         Command::Insert { table, values } => handle_insert(table, values, catalog, storage),
-        Command::Select { table, filter } => handle_select(table, filter, catalog, storage),
+        Command::Select {
+            table,
+            columns,
+            filter,
+        } => handle_select(table, columns, filter, catalog, storage),
     }
 }
 
@@ -58,6 +62,7 @@ fn handle_insert(
 
 fn handle_select(
     table: String,
+    columns: Option<Vec<String>>,
     filter: Option<WhereClause>,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
@@ -65,12 +70,51 @@ fn handle_select(
     let schema = catalog.schema(&table)?;
     let rows = storage.scan(&table)?;
 
-    if let Some(where_clause) = filter {
-        let filtered_rows = filter_rows(schema, rows, &where_clause)?;
-        return Ok(format_select(schema, &filtered_rows));
+    let filtered_rows = if let Some(where_clause) = filter {
+        filter_rows(schema, rows, &where_clause)?
+    } else {
+        rows.to_vec()
+    };
+
+    let (out_schema, out_rows) = project_rows(schema, &filtered_rows, columns.as_ref())?;
+    Ok(format_select(&out_schema, &out_rows))
+}
+
+fn project_rows(
+    schema: &Schema,
+    rows: &[Row],
+    columns: Option<&Vec<String>>,
+) -> Result<(Schema, Vec<Row>), String> {
+    let Some(requested_columns) = columns else {
+        return Ok((schema.clone(), rows.to_vec()));
+    };
+
+    if requested_columns.is_empty() {
+        return Ok((schema.clone(), rows.to_vec()));
     }
 
-    Ok(format_select(schema, rows))
+    let mut selected: Vec<(usize, Column)> = Vec::new();
+    for name in requested_columns {
+        let idx = schema
+            .columns
+            .iter()
+            .position(|c| c.name == *name)
+            .ok_or_else(|| format!("Unknown column '{}' in SELECT list", name))?;
+        selected.push((idx, schema.columns[idx].clone()));
+    }
+
+    let projected_schema = Schema::new(selected.iter().map(|(_, c)| c.clone()).collect());
+    let projected_rows: Vec<Row> = rows
+        .iter()
+        .map(|row| {
+            selected
+                .iter()
+                .map(|(idx, _)| row[*idx].clone())
+                .collect::<Row>()
+        })
+        .collect();
+
+    Ok((projected_schema, projected_rows))
 }
 
 fn filter_rows(

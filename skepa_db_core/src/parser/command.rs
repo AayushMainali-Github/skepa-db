@@ -31,6 +31,7 @@ pub enum Command {
 
     Select {
         table: String,
+        columns: Option<Vec<String>>,
         filter: Option<WhereClause>,
     },
 }

@@ -31,9 +31,9 @@ fn main() {
             println!("  parse <cmd>   -> show parsed Command (debug)");
             println!("  create <table> <col:type> ...");
             println!("  insert <table> <v1> <v2> ...");
-            println!("  select <table> [where <column> <op> <value>]");
+            println!("  select <col1,col2|*> from <table> [where <column> <op> <value>]");
             println!("  where ops: =|eq|>|gt|<|lt|>=|gte|<=|lte|like");
-            println!("  like uses '*' wildcard, e.g. \"ra*\", \"*ir\", \"*av*\"");
+            println!("  like uses '*' and '?' wildcards, e.g. \"ra*\", \"*ir\", \"*av*\", \"r?m\"");
             println!("  exit|quit     -> quit");
             continue;
         }

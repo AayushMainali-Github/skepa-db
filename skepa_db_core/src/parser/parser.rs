@@ -127,35 +127,62 @@ fn parse_insert(tokens: &[String]) -> Result<Command, String> {
 }
 
 fn parse_select(tokens: &[String]) -> Result<Command, String> {
-    if tokens.len() == 2 {
+    parse_select_projection(tokens)
+}
+
+fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
+    if tokens.len() < 4 || !tokens[2].eq_ignore_ascii_case("from") {
+        return Err(
+            "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>]".to_string(),
+        );
+    }
+
+    let columns = parse_select_columns(&tokens[1])?;
+    let table = tokens[3].clone();
+
+    if tokens.len() == 4 {
         return Ok(Command::Select {
-            table: tokens[1].clone(),
+            table,
+            columns: Some(columns),
             filter: None,
         });
     }
 
-    if tokens.len() != 6 {
+    if tokens.len() != 8 || !tokens[4].eq_ignore_ascii_case("where") {
         return Err(
-            "Usage: select <table> [where <column> <op> <value>]".to_string(),
+            "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>]".to_string(),
         );
     }
 
-    if !tokens[2].eq_ignore_ascii_case("where") {
-        return Err(
-            "Usage: select <table> [where <column> <op> <value>]".to_string(),
-        );
-    }
-
-    let op = parse_compare_op(&tokens[4])?;
-
+    let op = parse_compare_op(&tokens[6])?;
     Ok(Command::Select {
-        table: tokens[1].clone(),
+        table,
+        columns: Some(columns),
         filter: Some(WhereClause {
-            column: tokens[3].clone(),
+            column: tokens[5].clone(),
             op,
-            value: tokens[5].clone(),
+            value: tokens[7].clone(),
         }),
     })
+}
+
+fn parse_select_columns(token: &str) -> Result<Vec<String>, String> {
+    if token == "*" {
+        return Ok(Vec::new());
+    }
+
+    let columns: Vec<String> = token
+        .split(',')
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .map(ToString::to_string)
+        .collect();
+
+    if columns.is_empty() {
+        return Err("SELECT column list cannot be empty. Use '*' or comma-separated column names.".to_string());
+    }
+
+    Ok(columns)
 }
 
 fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
