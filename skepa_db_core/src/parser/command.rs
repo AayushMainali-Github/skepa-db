@@ -40,6 +40,10 @@ pub enum TableConstraintDef {
 
 #[derive(Debug)]
 pub enum Command {
+    Begin,
+    Commit,
+    Rollback,
+
     Create {
         table: String,
         columns: Vec<ColumnDef>,

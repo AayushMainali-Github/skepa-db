@@ -11,7 +11,7 @@ use crate::types::Row;
 /// Disk-backed storage scaffold.
 /// For now this keeps rows in-memory during process lifetime while
 /// initializing the on-disk layout required for the full disk migration.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DiskStorage {
     root: PathBuf,
     tables: HashMap<String, Vec<Row>>,

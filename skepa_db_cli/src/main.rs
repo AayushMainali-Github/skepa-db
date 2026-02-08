@@ -29,6 +29,7 @@ fn main() {
         if input.eq_ignore_ascii_case("help") {
             println!("Commands:");
             println!("  parse <cmd>   -> show parsed Command (debug)");
+            println!("  begin | commit | rollback");
             println!("  create table <table> (<col> <type> [primary key|unique|not null], ..., [primary key(<col,...>)], [unique(<col,...>)])");
             println!("  insert into <table> values (<v1>, <v2>, ...)");
             println!("  update <table> set <col> = <value> [, <col> = <value> ...] where <column> <op> <value>");

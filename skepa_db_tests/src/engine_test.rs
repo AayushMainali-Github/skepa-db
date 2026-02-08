@@ -845,3 +845,107 @@ fn test_persistence_reopen_update_delete() {
     let _ = std::fs::remove_dir_all(&path);
 }
 
+#[test]
+fn test_transaction_commit_persists_changes() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text)").unwrap();
+    assert_eq!(db.execute("begin").unwrap(), "transaction started");
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    assert_eq!(db.execute("commit").unwrap(), "transaction committed");
+    assert_eq!(db.execute("select * from users").unwrap(), "id\tname\n1\tram");
+}
+
+#[test]
+fn test_transaction_rollback_discards_changes() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text)").unwrap();
+    db.execute("begin").unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    assert_eq!(db.execute("rollback").unwrap(), "transaction rolled back");
+    assert_eq!(db.execute("select * from users").unwrap(), "id\tname");
+}
+
+#[test]
+fn test_transaction_is_visible_inside_tx_before_commit() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text)").unwrap();
+    db.execute("begin").unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    assert_eq!(db.execute("select * from users").unwrap(), "id\tname\n1\tram");
+    db.execute("rollback").unwrap();
+}
+
+#[test]
+fn test_nested_begin_is_rejected() {
+    let mut db = test_db();
+    db.execute("begin").unwrap();
+    let err = db.execute("begin").unwrap_err();
+    assert!(err.to_lowercase().contains("already active"));
+}
+
+#[test]
+fn test_commit_without_active_tx_errors() {
+    let mut db = test_db();
+    let err = db.execute("commit").unwrap_err();
+    assert!(err.to_lowercase().contains("no active transaction"));
+}
+
+#[test]
+fn test_rollback_without_active_tx_errors() {
+    let mut db = test_db();
+    let err = db.execute("rollback").unwrap_err();
+    assert!(err.to_lowercase().contains("no active transaction"));
+}
+
+#[test]
+fn test_create_inside_transaction_is_rejected() {
+    let mut db = test_db();
+    db.execute("begin").unwrap();
+    let err = db.execute("create table t (id int)").unwrap_err();
+    assert!(err.to_lowercase().contains("cannot run inside an active transaction"));
+}
+
+#[test]
+fn test_transaction_commit_persists_after_reopen() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_tx_commit_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("begin").unwrap();
+        db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+        db.execute("commit").unwrap();
+    }
+
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(db.execute("select * from users").unwrap(), "id\tname\n1\tram");
+    }
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_transaction_rollback_not_persisted_after_reopen() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_tx_rollback_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("begin").unwrap();
+        db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+        db.execute("rollback").unwrap();
+    }
+
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(db.execute("select * from users").unwrap(), "id\tname");
+    }
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+

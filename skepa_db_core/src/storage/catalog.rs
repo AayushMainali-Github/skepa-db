@@ -7,7 +7,7 @@ use crate::types::datatype::DataType;
 use crate::storage::schema::{Schema, Column};
 
 /// Manages table schemas (metadata catalog)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Catalog {
     tables: HashMap<String, Schema>,
 }

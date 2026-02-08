@@ -625,3 +625,17 @@ fn parse_create_bad_varchar_size_errors() {
     let err = parse("create table t (v varchar(0))").unwrap_err();
     assert!(err.to_lowercase().contains("varchar"));
 }
+
+#[test]
+fn parse_begin_commit_rollback() {
+    assert!(matches!(parse("begin").unwrap(), Command::Begin));
+    assert!(matches!(parse("commit").unwrap(), Command::Commit));
+    assert!(matches!(parse("rollback").unwrap(), Command::Rollback));
+}
+
+#[test]
+fn parse_begin_commit_rollback_usage_errors() {
+    assert!(parse("begin now").unwrap_err().to_lowercase().contains("usage: begin"));
+    assert!(parse("commit now").unwrap_err().to_lowercase().contains("usage: commit"));
+    assert!(parse("rollback now").unwrap_err().to_lowercase().contains("usage: rollback"));
+}

@@ -30,6 +30,9 @@ pub fn execute_command(
             columns,
             filter,
         } => handle_select(table, columns, filter, catalog, storage),
+        Command::Begin | Command::Commit | Command::Rollback => {
+            Err("Transaction control is handled by Database".to_string())
+        }
     }
 }
 

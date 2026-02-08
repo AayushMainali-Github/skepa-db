@@ -12,6 +12,15 @@
 - **Syntax**: `insert into <table> values (<val>, <val>, ...)`
 - **Example**: `insert into users values (1, "Alice", 30)`
 
+## Transactions
+- **Syntax**:
+  - `begin`
+  - `commit`
+  - `rollback`
+- Notes:
+  - `insert`, `update`, `delete` can be grouped in one transaction.
+  - `create table` is auto-commit and is not allowed inside an active transaction.
+
 ## Update
 - Updates one or more columns for rows matching a WHERE condition.
 - **Syntax**: `update <table> set <col> = <value> [, <col> = <value> ...] where <column> <operator> <value>`

@@ -12,6 +12,9 @@ pub fn parse(input: &str) -> Result<Command, String> {
     let keyword = tokens[0].to_lowercase();
 
     match keyword.as_str() {
+        "begin" => parse_begin(&tokens),
+        "commit" => parse_commit(&tokens),
+        "rollback" => parse_rollback(&tokens),
         "create" => parse_create(&tokens),
         "insert" => parse_insert(&tokens),
         "update" => parse_update(&tokens),
@@ -19,6 +22,27 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "select" => parse_select(&tokens),
         _ => Err(format!("Unknown command '{}'", tokens[0])),
     }
+}
+
+fn parse_begin(tokens: &[String]) -> Result<Command, String> {
+    if tokens.len() != 1 {
+        return Err("Usage: begin".to_string());
+    }
+    Ok(Command::Begin)
+}
+
+fn parse_commit(tokens: &[String]) -> Result<Command, String> {
+    if tokens.len() != 1 {
+        return Err("Usage: commit".to_string());
+    }
+    Ok(Command::Commit)
+}
+
+fn parse_rollback(tokens: &[String]) -> Result<Command, String> {
+    if tokens.len() != 1 {
+        return Err("Usage: rollback".to_string());
+    }
+    Ok(Command::Rollback)
 }
 
 fn tokenize(input: &str) -> Result<Vec<String>, String> {
