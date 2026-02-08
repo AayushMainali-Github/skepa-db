@@ -1,4 +1,6 @@
-use crate::parser::command::{Assignment, ColumnDef, Command, CompareOp, WhereClause};
+use crate::parser::command::{
+    Assignment, ColumnDef, Command, CompareOp, TableConstraintDef, WhereClause,
+};
 use crate::types::datatype::{DataType, parse_datatype};
 
 pub fn parse(input: &str) -> Result<Command, String> {
@@ -142,6 +144,7 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
     let table = tokens[2].clone();
 
     let mut cols: Vec<ColumnDef> = Vec::new();
+    let mut table_constraints: Vec<TableConstraintDef> = Vec::new();
     let mut i = 4usize;
     let end = tokens.len() - 1;
 
@@ -149,19 +152,25 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
         if i >= end {
             return Err("Bad CREATE column list. Use: (id int, name text)".to_string());
         }
-        let name = tokens[i].clone();
-        i += 1;
-        let (dtype, next_i) = parse_datatype_in_create(tokens, i, end)?;
-        let (primary_key, unique, not_null, after_constraints) =
-            parse_constraints_in_create(tokens, next_i, end)?;
-        i = after_constraints;
-        cols.push(ColumnDef {
-            name,
-            dtype,
-            primary_key,
-            unique,
-            not_null,
-        });
+        if tokens[i].eq_ignore_ascii_case("primary") || tokens[i].eq_ignore_ascii_case("unique") {
+            let (constraint, next_i) = parse_table_constraint_in_create(tokens, i, end)?;
+            table_constraints.push(constraint);
+            i = next_i;
+        } else {
+            let name = tokens[i].clone();
+            i += 1;
+            let (dtype, next_i) = parse_datatype_in_create(tokens, i, end)?;
+            let (primary_key, unique, not_null, after_constraints) =
+                parse_constraints_in_create(tokens, next_i, end)?;
+            i = after_constraints;
+            cols.push(ColumnDef {
+                name,
+                dtype,
+                primary_key,
+                unique,
+                not_null,
+            });
+        }
         if i < end {
             if tokens[i] != "," {
                 return Err("Bad CREATE column list. Columns must be comma-separated.".to_string());
@@ -180,6 +189,7 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
     Ok(Command::Create {
         table,
         columns: cols,
+        table_constraints,
     })
 }
 
@@ -482,4 +492,57 @@ fn parse_constraints_in_create(
     }
 
     Ok((primary_key, unique, not_null, i))
+}
+
+fn parse_table_constraint_in_create(
+    tokens: &[String],
+    start: usize,
+    end: usize,
+) -> Result<(TableConstraintDef, usize), String> {
+    if tokens[start].eq_ignore_ascii_case("primary") {
+        if start + 1 >= end || !tokens[start + 1].eq_ignore_ascii_case("key") {
+            return Err("Bad PRIMARY KEY constraint. Use primary key(col1,col2)".to_string());
+        }
+        let (cols, next) = parse_column_name_list(tokens, start + 2, end)?;
+        return Ok((TableConstraintDef::PrimaryKey(cols), next));
+    }
+    if tokens[start].eq_ignore_ascii_case("unique") {
+        let (cols, next) = parse_column_name_list(tokens, start + 1, end)?;
+        return Ok((TableConstraintDef::Unique(cols), next));
+    }
+    Err("Unknown table constraint".to_string())
+}
+
+fn parse_column_name_list(
+    tokens: &[String],
+    start: usize,
+    end: usize,
+) -> Result<(Vec<String>, usize), String> {
+    if start >= end || tokens[start] != "(" {
+        return Err("Constraint column list must start with '('".to_string());
+    }
+    let mut i = start + 1;
+    let mut cols: Vec<String> = Vec::new();
+    let mut expect_col = true;
+    while i < end {
+        if tokens[i] == ")" {
+            if cols.is_empty() || expect_col {
+                return Err("Constraint column list cannot be empty".to_string());
+            }
+            return Ok((cols, i + 1));
+        }
+        if expect_col {
+            if tokens[i] == "," {
+                return Err("Bad constraint column list".to_string());
+            }
+            cols.push(tokens[i].clone());
+            expect_col = false;
+        } else if tokens[i] != "," {
+            return Err("Bad constraint column list, expected comma".to_string());
+        } else {
+            expect_col = true;
+        }
+        i += 1;
+    }
+    Err("Unclosed constraint column list".to_string())
 }

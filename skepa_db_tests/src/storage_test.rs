@@ -42,6 +42,7 @@ fn catalog_save_load_roundtrip() {
                     not_null: false,
                 },
             ],
+            vec![],
         )
         .unwrap();
 

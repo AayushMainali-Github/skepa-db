@@ -767,6 +767,40 @@ fn test_constraint_persistence_after_reopen() {
 }
 
 #[test]
+fn test_composite_primary_key_constraint() {
+    let mut db = test_db();
+    db.execute("create table t (a int, b int, val text, primary key(a,b))")
+        .unwrap();
+    db.execute(r#"insert into t values (1, 1, "x")"#).unwrap();
+    db.execute(r#"insert into t values (1, 2, "y")"#).unwrap();
+    let err = db
+        .execute(r#"insert into t values (1, 1, "dup")"#)
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("primary key"));
+}
+
+#[test]
+fn test_composite_unique_constraint() {
+    let mut db = test_db();
+    db.execute("create table t (a int, b int, c int, unique(a,b))")
+        .unwrap();
+    db.execute("insert into t values (1, 1, 10)").unwrap();
+    db.execute("insert into t values (1, 2, 10)").unwrap();
+    let err = db.execute("insert into t values (1, 1, 11)").unwrap_err();
+    assert!(err.to_lowercase().contains("unique"));
+}
+
+#[test]
+fn test_composite_unique_violation_on_update() {
+    let mut db = test_db();
+    db.execute("create table t (a int, b int, unique(a,b))").unwrap();
+    db.execute("insert into t values (1, 1)").unwrap();
+    db.execute("insert into t values (1, 2)").unwrap();
+    let err = db.execute("update t set b = 1 where b = 2").unwrap_err();
+    assert!(err.to_lowercase().contains("unique"));
+}
+
+#[test]
 fn test_persistence_reopen_insert() {
     let mut path: PathBuf = std::env::temp_dir();
     path.push(format!("skepa_db_persist_{}_insert", std::process::id()));

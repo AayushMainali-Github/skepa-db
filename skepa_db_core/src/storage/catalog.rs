@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::parser::command::ColumnDef;
+use crate::parser::command::{ColumnDef, TableConstraintDef};
 use crate::types::datatype::DataType;
 use crate::storage::schema::{Schema, Column};
 
@@ -15,6 +15,8 @@ pub struct Catalog {
 #[derive(Debug, Serialize, Deserialize)]
 struct CatalogFile {
     tables: HashMap<String, Vec<ColumnFile>>,
+    #[serde(default)]
+    table_constraints: HashMap<String, TableConstraintFile>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,6 +29,14 @@ struct ColumnFile {
     unique: bool,
     #[serde(default)]
     not_null: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+struct TableConstraintFile {
+    #[serde(default)]
+    primary_key: Vec<String>,
+    #[serde(default)]
+    unique: Vec<Vec<String>>,
 }
 
 impl Catalog {
@@ -48,15 +58,14 @@ impl Catalog {
         &mut self,
         table: String,
         cols: Vec<ColumnDef>,
+        table_constraints: Vec<TableConstraintDef>,
     ) -> Result<(), String> {
         if self.exists(&table) {
             return Err(format!("Table '{}' already exists", table));
         }
 
-        let pk_count = cols.iter().filter(|c| c.primary_key).count();
-        if pk_count > 1 {
-            return Err("Only one PRIMARY KEY column is supported".to_string());
-        }
+        let mut primary_key: Vec<String> = Vec::new();
+        let mut unique_constraints: Vec<Vec<String>> = Vec::new();
 
         let columns: Vec<Column> = cols
             .into_iter()
@@ -69,7 +78,62 @@ impl Catalog {
             })
             .collect();
 
-        let schema = Schema::new(columns);
+        for c in &columns {
+            if c.primary_key {
+                primary_key.push(c.name.clone());
+            }
+            if c.unique && !c.primary_key {
+                unique_constraints.push(vec![c.name.clone()]);
+            }
+        }
+
+        if primary_key.len() > 1 {
+            return Err("Only one PRIMARY KEY constraint is supported".to_string());
+        }
+
+        for tc in table_constraints {
+            match tc {
+                TableConstraintDef::PrimaryKey(cols) => {
+                    if !primary_key.is_empty() {
+                        return Err("Only one PRIMARY KEY constraint is supported".to_string());
+                    }
+                    primary_key = cols;
+                }
+                TableConstraintDef::Unique(cols) => {
+                    unique_constraints.push(cols);
+                }
+            }
+        }
+
+        if primary_key.is_empty() {
+            // keep empty
+        } else {
+            for pk_col in &primary_key {
+                if let Some(col) = columns.iter().find(|c| &c.name == pk_col) {
+                    if !col.not_null {
+                        // enforced semantically by PK
+                    }
+                } else {
+                    return Err(format!("PRIMARY KEY references unknown column '{pk_col}'"));
+                }
+            }
+        }
+
+        for uniq in &unique_constraints {
+            for c in uniq {
+                if columns.iter().all(|col| &col.name != c) {
+                    return Err(format!("UNIQUE references unknown column '{c}'"));
+                }
+            }
+        }
+
+        let mut schema = Schema::with_constraints(columns, primary_key.clone(), unique_constraints.clone());
+        // PK implies NOT NULL on referenced columns.
+        for c in &mut schema.columns {
+            if primary_key.iter().any(|pk| pk == &c.name) {
+                c.not_null = true;
+            }
+        }
         self.tables.insert(table, schema);
         Ok(())
     }
@@ -93,6 +157,7 @@ impl Catalog {
     /// Saves catalog metadata to disk.
     pub fn save_to_path(&self, path: &Path) -> Result<(), String> {
         let mut tables: HashMap<String, Vec<ColumnFile>> = HashMap::new();
+        let mut table_constraints: HashMap<String, TableConstraintFile> = HashMap::new();
         for (table, schema) in &self.tables {
             let cols: Vec<ColumnFile> = schema
                 .columns
@@ -123,9 +188,16 @@ impl Catalog {
                 })
                 .collect();
             tables.insert(table.clone(), cols);
+            table_constraints.insert(
+                table.clone(),
+                TableConstraintFile {
+                    primary_key: schema.primary_key.clone(),
+                    unique: schema.unique_constraints.clone(),
+                },
+            );
         }
 
-        let payload = serde_json::to_string_pretty(&CatalogFile { tables })
+        let payload = serde_json::to_string_pretty(&CatalogFile { tables, table_constraints })
             .map_err(|e| format!("Failed to serialize catalog as JSON: {e}"))?;
         fs::write(path, payload).map_err(|e| format!("Failed to write catalog file: {e}"))
     }
@@ -143,8 +215,12 @@ impl Catalog {
 
         let file: CatalogFile = serde_json::from_str(&content)
             .map_err(|e| format!("Malformed catalog JSON: {e}"))?;
+        let CatalogFile {
+            tables: file_tables,
+            table_constraints: file_constraints,
+        } = file;
         let mut tables: HashMap<String, Schema> = HashMap::new();
-        for (table, cols) in file.tables {
+        for (table, cols) in file_tables {
             let mut columns: Vec<Column> = Vec::new();
             for c in cols {
                 let dtype = crate::types::datatype::parse_datatype(&c.dtype)?;
@@ -156,7 +232,11 @@ impl Catalog {
                     not_null: c.not_null,
                 });
             }
-            tables.insert(table, Schema::new(columns));
+            let tc = file_constraints.get(&table).cloned().unwrap_or_default();
+            tables.insert(
+                table,
+                Schema::with_constraints(columns, tc.primary_key, tc.unique),
+            );
         }
 
         Ok(Self { tables })

@@ -14,12 +14,30 @@ pub struct Column {
 #[derive(Debug, Clone)]
 pub struct Schema {
     pub columns: Vec<Column>,
+    pub primary_key: Vec<String>,
+    pub unique_constraints: Vec<Vec<String>>,
 }
 
 impl Schema {
     /// Creates a new schema from a list of column definitions
     pub fn new(columns: Vec<Column>) -> Self {
-        Self { columns }
+        Self {
+            columns,
+            primary_key: Vec::new(),
+            unique_constraints: Vec::new(),
+        }
+    }
+
+    pub fn with_constraints(
+        columns: Vec<Column>,
+        primary_key: Vec<String>,
+        unique_constraints: Vec<Vec<String>>,
+    ) -> Self {
+        Self {
+            columns,
+            primary_key,
+            unique_constraints,
+        }
     }
 
     /// Returns the number of columns in this schema

@@ -1,5 +1,5 @@
 use crate::engine::format::format_select;
-use crate::parser::command::{Assignment, ColumnDef, Command, CompareOp, WhereClause};
+use crate::parser::command::{Assignment, ColumnDef, Command, CompareOp, TableConstraintDef, WhereClause};
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, Value};
@@ -13,7 +13,11 @@ pub fn execute_command(
     storage: &mut dyn StorageEngine,
 ) -> Result<String, String> {
     match cmd {
-        Command::Create { table, columns } => handle_create(table, columns, catalog, storage),
+        Command::Create {
+            table,
+            columns,
+            table_constraints,
+        } => handle_create(table, columns, table_constraints, catalog, storage),
         Command::Insert { table, values } => handle_insert(table, values, catalog, storage),
         Command::Update {
             table,
@@ -32,10 +36,11 @@ pub fn execute_command(
 fn handle_create(
     table: String,
     columns: Vec<ColumnDef>,
+    table_constraints: Vec<TableConstraintDef>,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
 ) -> Result<String, String> {
-    catalog.create_table(table.clone(), columns)?;
+    catalog.create_table(table.clone(), columns, table_constraints)?;
     storage.create_table(&table)?;
     Ok(format!("created table {}", table))
 }
@@ -272,19 +277,17 @@ fn validate_unique_constraints(
     candidate: &Row,
     skip_idx: Option<usize>,
 ) -> Result<(), String> {
-    for (col_idx, col) in schema.columns.iter().enumerate() {
-        if !col.unique && !col.primary_key {
-            continue;
-        }
+    for (kind, idxs, cols) in unique_constraint_groups(schema)? {
         for (row_idx, existing) in rows.iter().enumerate() {
             if skip_idx == Some(row_idx) {
                 continue;
             }
-            if existing.get(col_idx) == candidate.get(col_idx) {
-                let kind = if col.primary_key { "PRIMARY KEY" } else { "UNIQUE" };
+            let same = idxs.iter().all(|i| existing.get(*i) == candidate.get(*i));
+            if same {
                 return Err(format!(
-                    "{} constraint violation on column '{}'",
-                    kind, col.name
+                    "{} constraint violation on column(s) {}",
+                    kind,
+                    cols.join(",")
                 ));
             }
         }
@@ -297,6 +300,59 @@ fn validate_all_unique_constraints(schema: &Schema, rows: &[Row]) -> Result<(), 
         validate_unique_constraints(schema, rows, &rows[idx], Some(idx))?;
     }
     Ok(())
+}
+
+fn unique_constraint_groups(
+    schema: &Schema,
+) -> Result<Vec<(&'static str, Vec<usize>, Vec<String>)>, String> {
+    let mut out: Vec<(&'static str, Vec<usize>, Vec<String>)> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    if !schema.primary_key.is_empty() {
+        let (idxs, cols) = resolve_cols(schema, &schema.primary_key)?;
+        let key = format!("PK:{}", cols.join(","));
+        if seen.insert(key) {
+            out.push(("PRIMARY KEY", idxs, cols));
+        }
+    }
+
+    for c in &schema.unique_constraints {
+        let (idxs, cols) = resolve_cols(schema, c)?;
+        let key = format!("UQ:{}", cols.join(","));
+        if seen.insert(key) {
+            out.push(("UNIQUE", idxs, cols));
+        }
+    }
+
+    for col in &schema.columns {
+        if col.unique && !col.primary_key {
+            let idx = schema
+                .columns
+                .iter()
+                .position(|x| x.name == col.name)
+                .ok_or_else(|| "Internal schema error".to_string())?;
+            let cols = vec![col.name.clone()];
+            let key = format!("UQ:{}", cols.join(","));
+            if seen.insert(key) {
+                out.push(("UNIQUE", vec![idx], cols));
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+fn resolve_cols(schema: &Schema, names: &[String]) -> Result<(Vec<usize>, Vec<String>), String> {
+    let mut idxs: Vec<usize> = Vec::new();
+    for n in names {
+        let idx = schema
+            .columns
+            .iter()
+            .position(|c| c.name == *n)
+            .ok_or_else(|| format!("Unknown column '{}' in constraint", n))?;
+        idxs.push(idx);
+    }
+    Ok((idxs, names.to_vec()))
 }
 
 fn matches_where(cell: &Value, dtype: &DataType, op: &CompareOp, rhs_token: &str) -> Result<bool, String> {

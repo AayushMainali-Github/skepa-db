@@ -7,7 +7,7 @@ fn parse_create_basic() {
     let cmd = parse(r#"create table users (id int, name text)"#).unwrap();
 
     match cmd {
-        Command::Create { table, columns } => {
+        Command::Create { table, columns, .. } => {
             assert_eq!(table, "users");
             assert_eq!(columns.len(), 2);
             assert_eq!(columns[0].name, "id");
@@ -535,7 +535,7 @@ fn where_not_equal_not_supported() {
 fn tokenizer_handles_parentheses_without_spaces() {
     let cmd = parse("create table u(id int,name text)").unwrap();
     match cmd {
-        Command::Create { table, columns } => {
+        Command::Create { table, columns, .. } => {
             assert_eq!(table, "u");
             assert_eq!(columns.len(), 2);
         }
@@ -550,7 +550,7 @@ fn parse_create_with_extended_types() {
     )
     .unwrap();
     match cmd {
-        Command::Create { table, columns } => {
+        Command::Create { table, columns, .. } => {
             assert_eq!(table, "t");
             assert_eq!(columns.len(), 11);
         }
@@ -593,6 +593,25 @@ fn parse_primary_key_implies_unique_and_not_null() {
 fn parse_unknown_constraint_token_errors() {
     let err = parse("create table t (id int indexed)").unwrap_err();
     assert!(err.to_lowercase().contains("unknown column constraint"));
+}
+
+#[test]
+fn parse_create_with_composite_constraints() {
+    let cmd = parse(
+        "create table m (a int, b int, c text, primary key(a,b), unique(b,c))",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create {
+            columns,
+            table_constraints,
+            ..
+        } => {
+            assert_eq!(columns.len(), 3);
+            assert_eq!(table_constraints.len(), 2);
+        }
+        _ => panic!("Expected Create command"),
+    }
 }
 
 #[test]

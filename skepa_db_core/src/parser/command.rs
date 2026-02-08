@@ -32,11 +32,18 @@ pub struct ColumnDef {
     pub not_null: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum TableConstraintDef {
+    PrimaryKey(Vec<String>),
+    Unique(Vec<String>),
+}
+
 #[derive(Debug)]
 pub enum Command {
     Create {
         table: String,
         columns: Vec<ColumnDef>,
+        table_constraints: Vec<TableConstraintDef>,
     },
 
     Insert {
