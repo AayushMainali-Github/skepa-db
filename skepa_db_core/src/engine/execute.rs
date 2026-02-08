@@ -4,6 +4,7 @@ use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, Value};
 use crate::types::Row;
+use std::cmp::Ordering;
 
 /// Executes a parsed command against the catalog and storage engine
 pub fn execute_command(
@@ -258,31 +259,51 @@ fn matches_where(cell: &Value, dtype: &DataType, op: &CompareOp, rhs_token: &str
             let rhs = parse_value(dtype, rhs_token)?;
             Ok(cell == &rhs)
         }
-        CompareOp::Gt | CompareOp::Lt | CompareOp::Gte | CompareOp::Lte => match (cell, dtype) {
-            (Value::Int(lhs), DataType::Int) => {
-                let rhs = match parse_value(dtype, rhs_token)? {
-                    Value::Int(n) => n,
-                    _ => unreachable!(),
-                };
-
-                Ok(match op {
-                    CompareOp::Gt => *lhs > rhs,
-                    CompareOp::Lt => *lhs < rhs,
-                    CompareOp::Gte => *lhs >= rhs,
-                    CompareOp::Lte => *lhs <= rhs,
-                    _ => unreachable!(),
-                })
-            }
-            (_, DataType::Text) => Err(
-                "Operator gt/lt/gte/lte is only valid for int columns. Use '=' or 'like' for text."
-                    .to_string(),
-            ),
-            _ => Err("Type mismatch while evaluating numeric WHERE clause".to_string()),
-        },
+        CompareOp::Gt | CompareOp::Lt | CompareOp::Gte | CompareOp::Lte => {
+            let rhs = parse_value(dtype, rhs_token)?;
+            let ord = compare_order(cell, &rhs, dtype)?;
+            Ok(match op {
+                CompareOp::Gt => ord == Ordering::Greater,
+                CompareOp::Lt => ord == Ordering::Less,
+                CompareOp::Gte => ord != Ordering::Less,
+                CompareOp::Lte => ord != Ordering::Greater,
+                _ => unreachable!(),
+            })
+        }
         CompareOp::Like => match (cell, dtype) {
             (Value::Text(lhs), DataType::Text) => Ok(wildcard_match(lhs, rhs_token)),
+            (Value::VarChar(lhs), DataType::VarChar(_)) => Ok(wildcard_match(lhs, rhs_token)),
             _ => Err("Operator 'like' is only valid for text columns".to_string()),
         },
+    }
+}
+
+fn compare_order(lhs: &Value, rhs: &Value, dtype: &DataType) -> Result<Ordering, String> {
+    match dtype {
+        DataType::Int => match (lhs, rhs) {
+            (Value::Int(a), Value::Int(b)) => Ok(a.cmp(b)),
+            _ => Err("Type mismatch while evaluating int comparison".to_string()),
+        },
+        DataType::BigInt => match (lhs, rhs) {
+            (Value::BigInt(a), Value::BigInt(b)) => Ok(a.cmp(b)),
+            _ => Err("Type mismatch while evaluating bigint comparison".to_string()),
+        },
+        DataType::Decimal { .. } => match (lhs, rhs) {
+            (Value::Decimal(a), Value::Decimal(b)) => Ok(a.cmp(b)),
+            _ => Err("Type mismatch while evaluating decimal comparison".to_string()),
+        },
+        DataType::Date => match (lhs, rhs) {
+            (Value::Date(a), Value::Date(b)) => Ok(a.cmp(b)),
+            _ => Err("Type mismatch while evaluating date comparison".to_string()),
+        },
+        DataType::Timestamp => match (lhs, rhs) {
+            (Value::Timestamp(a), Value::Timestamp(b)) => Ok(a.cmp(b)),
+            _ => Err("Type mismatch while evaluating timestamp comparison".to_string()),
+        },
+        _ => Err(
+            "Operator gt/lt/gte/lte is only valid for int|bigint|decimal|date|timestamp columns."
+                .to_string(),
+        ),
     }
 }
 

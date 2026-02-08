@@ -146,13 +146,14 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
     let end = tokens.len() - 1;
 
     while i < end {
-        if i + 1 >= end {
+        if i >= end {
             return Err("Bad CREATE column list. Use: (id int, name text)".to_string());
         }
         let name = tokens[i].clone();
-        let dtype = parse_datatype(&tokens[i + 1])?;
+        i += 1;
+        let (dtype, next_i) = parse_datatype_in_create(tokens, i, end)?;
+        i = next_i;
         cols.push((name, dtype));
-        i += 2;
         if i < end {
             if tokens[i] != "," {
                 return Err("Bad CREATE column list. Columns must be comma-separated.".to_string());
@@ -398,5 +399,37 @@ fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
         _ => Err(format!(
             "Unknown WHERE operator '{raw}'. Use =|eq|>|gt|<|lt|>=|gte|<=|lte|like"
         )),
+    }
+}
+
+fn parse_datatype_in_create(
+    tokens: &[String],
+    start: usize,
+    end: usize,
+) -> Result<(DataType, usize), String> {
+    if start >= end {
+        return Err("Missing datatype in CREATE column definition".to_string());
+    }
+    let t = tokens[start].to_lowercase();
+    match t.as_str() {
+        "varchar" => {
+            if start + 3 >= end || tokens[start + 1] != "(" || tokens[start + 3] != ")" {
+                return Err("Bad varchar type. Use varchar(n)".to_string());
+            }
+            let combined = format!("varchar({})", tokens[start + 2]);
+            Ok((parse_datatype(&combined)?, start + 4))
+        }
+        "decimal" => {
+            if start + 5 >= end
+                || tokens[start + 1] != "("
+                || tokens[start + 3] != ","
+                || tokens[start + 5] != ")"
+            {
+                return Err("Bad decimal type. Use decimal(p,s)".to_string());
+            }
+            let combined = format!("decimal({},{})", tokens[start + 2], tokens[start + 4]);
+            Ok((parse_datatype(&combined)?, start + 6))
+        }
+        _ => Ok((parse_datatype(&tokens[start])?, start + 1)),
     }
 }

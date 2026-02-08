@@ -80,9 +80,20 @@ impl Catalog {
                 .columns
                 .iter()
                 .map(|c| {
-                    let dtype = match c.dtype {
+                    let dtype = match &c.dtype {
+                        DataType::Bool => "bool".to_string(),
                         DataType::Int => "int".to_string(),
+                        DataType::BigInt => "bigint".to_string(),
+                        DataType::Decimal { precision, scale } => {
+                            format!("decimal({precision},{scale})")
+                        }
+                        DataType::VarChar(n) => format!("varchar({n})"),
                         DataType::Text => "text".to_string(),
+                        DataType::Date => "date".to_string(),
+                        DataType::Timestamp => "timestamp".to_string(),
+                        DataType::Uuid => "uuid".to_string(),
+                        DataType::Json => "json".to_string(),
+                        DataType::Blob => "blob".to_string(),
                     };
                     ColumnFile {
                         name: c.name.clone(),
@@ -115,11 +126,7 @@ impl Catalog {
         for (table, cols) in file.tables {
             let mut columns: Vec<Column> = Vec::new();
             for c in cols {
-                let dtype = match c.dtype.to_lowercase().as_str() {
-                    "int" => DataType::Int,
-                    "text" => DataType::Text,
-                    other => return Err(format!("Unknown type '{other}' in catalog")),
-                };
+                let dtype = crate::types::datatype::parse_datatype(&c.dtype)?;
                 columns.push(Column {
                     name: c.name,
                     dtype,

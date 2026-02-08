@@ -232,3 +232,27 @@ fn empty_wal_file_is_handled() {
     let out = reopened.execute("select * from users").unwrap();
     assert_eq!(out, "id\tname");
 }
+
+#[test]
+fn persistence_roundtrip_extended_types() {
+    let path = temp_dir("persist_ext");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (b bool, bi bigint, d decimal(6,2), v varchar(5), dt date, ts timestamp, u uuid, j json, bl blob)")
+            .unwrap();
+        db.execute(r#"insert into t values (true, 123456, 12.34, "hello", 2025-01-02, "2025-01-02 03:04:05", 550e8400-e29b-41d4-a716-446655440000, "{\"k\":1}", 0xABCD)"#)
+            .unwrap();
+    }
+    {
+        let mut db = Database::open(path.clone());
+        let out = db.execute("select * from t").unwrap();
+        assert!(out.contains("true"));
+        assert!(out.contains("123456"));
+        assert!(out.contains("12.34"));
+        assert!(out.contains("hello"));
+        assert!(out.contains("2025-01-02"));
+        assert!(out.contains("550e8400-e29b-41d4-a716-446655440000"));
+        assert!(out.contains("{\"k\":1}"));
+        assert!(out.contains("0xABCD"));
+    }
+}

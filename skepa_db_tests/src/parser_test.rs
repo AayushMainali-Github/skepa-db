@@ -536,3 +536,30 @@ fn tokenizer_handles_parentheses_without_spaces() {
         _ => panic!("Expected Create command"),
     }
 }
+
+#[test]
+fn parse_create_with_extended_types() {
+    let cmd = parse(
+        "create table t (b bool, i int, bi bigint, d decimal(10,2), v varchar(20), tx text, dt date, ts timestamp, u uuid, j json, bl blob)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table, columns } => {
+            assert_eq!(table, "t");
+            assert_eq!(columns.len(), 11);
+        }
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_bad_decimal_params_errors() {
+    let err = parse("create table t (d decimal(2,5))").unwrap_err();
+    assert!(err.to_lowercase().contains("scale"));
+}
+
+#[test]
+fn parse_create_bad_varchar_size_errors() {
+    let err = parse("create table t (v varchar(0))").unwrap_err();
+    assert!(err.to_lowercase().contains("varchar"));
+}

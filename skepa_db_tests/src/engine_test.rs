@@ -596,6 +596,67 @@ fn test_update_missing_table_errors() {
 }
 
 #[test]
+fn test_extended_types_insert_and_select() {
+    let mut db = test_db();
+    db.execute("create table t (b bool, i int, bi bigint, d decimal(10,2), v varchar(5), tx text, dt date, ts timestamp, u uuid, j json, bl blob)").unwrap();
+    db.execute(r#"insert into t values (true, 12, 999999999999, 12.34, "hello", "world", 2025-01-02, "2025-01-02 03:04:05", 550e8400-e29b-41d4-a716-446655440000, "{\"a\":1}", 0xDEADBEEF)"#).unwrap();
+    let out = db.execute("select * from t").unwrap();
+    assert!(out.contains("true"));
+    assert!(out.contains("999999999999"));
+    assert!(out.contains("12.34"));
+    assert!(out.contains("2025-01-02"));
+    assert!(out.contains("550e8400-e29b-41d4-a716-446655440000"));
+    assert!(out.contains("{\"a\":1}"));
+    assert!(out.contains("0xDEADBEEF"));
+}
+
+#[test]
+fn test_varchar_length_enforced() {
+    let mut db = test_db();
+    db.execute("create table t (v varchar(3))").unwrap();
+    let err = db
+        .execute(r#"insert into t values ("hello")"#)
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("varchar(3)"));
+}
+
+#[test]
+fn test_decimal_precision_and_scale_enforced() {
+    let mut db = test_db();
+    db.execute("create table t (d decimal(5,2))").unwrap();
+    let e1 = db.execute("insert into t values (12345.67)").unwrap_err();
+    assert!(e1.to_lowercase().contains("precision"));
+    let e2 = db.execute("insert into t values (12.345)").unwrap_err();
+    assert!(e2.to_lowercase().contains("scale"));
+}
+
+#[test]
+fn test_date_and_timestamp_comparisons() {
+    let mut db = test_db();
+    db.execute("create table t (dt date, ts timestamp)").unwrap();
+    db.execute(r#"insert into t values (2025-01-01, "2025-01-01 10:00:00")"#).unwrap();
+    db.execute(r#"insert into t values (2025-01-02, "2025-01-02 10:00:00")"#).unwrap();
+    let d = db.execute("select * from t where dt > 2025-01-01").unwrap();
+    assert!(d.contains("2025-01-02"));
+    let t = db
+        .execute(r#"select * from t where ts >= "2025-01-02 10:00:00""#)
+        .unwrap();
+    assert!(t.contains("2025-01-02"));
+}
+
+#[test]
+fn test_bigint_and_decimal_comparisons() {
+    let mut db = test_db();
+    db.execute("create table t (bi bigint, d decimal(8,2))").unwrap();
+    db.execute("insert into t values (10, 1.10)").unwrap();
+    db.execute("insert into t values (20, 2.20)").unwrap();
+    let b = db.execute("select * from t where bi >= 20").unwrap();
+    assert!(b.contains("20"));
+    let d = db.execute("select * from t where d > 1.50").unwrap();
+    assert!(d.contains("2.2") || d.contains("2.20"));
+}
+
+#[test]
 fn test_persistence_reopen_insert() {
     let mut path: PathBuf = std::env::temp_dir();
     path.push(format!("skepa_db_persist_{}_insert", std::process::id()));
