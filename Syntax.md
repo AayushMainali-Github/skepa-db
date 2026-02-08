@@ -2,8 +2,10 @@
 
 ## Create
 - Creates a new table with specified columns and data types.
-- **Syntax**: `create table <table> (<col> <type>, <col> <type>, ...)`
-- **Example**: `create table users (id int, name text, age int)`
+- **Syntax**: `create table <table> (<col> <type> [primary key|unique|not null], ..., [primary key(<col,...>)], [unique(<col,...>)])`
+- **Examples**:
+  - `create table users (id int primary key, name text not null, age int)`
+  - `create table sessions (user_id int, device text, token text, primary key(user_id,device), unique(token))`
 
 ## Insert
 - Inserts one row into a table.
@@ -46,3 +48,15 @@
   - Contains: `"*av*"`
   - Exact: `"ram"`
   - Single-char: `"r?m"`, `"??vi"`
+
+## Constraints
+- Column constraints:
+  - `primary key` (implies `not null`)
+  - `unique`
+  - `not null`
+- Table constraints (composite):
+  - `primary key(col1,col2,...)`
+  - `unique(col1,col2,...)`
+- Rules:
+  - Only one primary key constraint is allowed per table.
+  - Composite primary key must be declared as table-level `primary key(...)`.
