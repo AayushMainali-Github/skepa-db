@@ -23,11 +23,20 @@ pub struct Assignment {
     pub value: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnDef {
+    pub name: String,
+    pub dtype: DataType,
+    pub primary_key: bool,
+    pub unique: bool,
+    pub not_null: bool,
+}
+
 #[derive(Debug)]
 pub enum Command {
     Create {
         table: String,
-        columns: Vec<(String, DataType)>,
+        columns: Vec<ColumnDef>,
     },
 
     Insert {

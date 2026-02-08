@@ -1,3 +1,4 @@
+use skepa_db_core::parser::command::ColumnDef;
 use skepa_db_core::storage::{Catalog, Column, DiskStorage, Schema, StorageEngine};
 use skepa_db_core::types::datatype::DataType;
 use skepa_db_core::types::value::Value;
@@ -26,8 +27,20 @@ fn catalog_save_load_roundtrip() {
         .create_table(
             "users".to_string(),
             vec![
-                ("id".to_string(), DataType::Int),
-                ("name".to_string(), DataType::Text),
+                ColumnDef {
+                    name: "id".to_string(),
+                    dtype: DataType::Int,
+                    primary_key: false,
+                    unique: false,
+                    not_null: false,
+                },
+                ColumnDef {
+                    name: "name".to_string(),
+                    dtype: DataType::Text,
+                    primary_key: false,
+                    unique: false,
+                    not_null: false,
+                },
             ],
         )
         .unwrap();
@@ -68,10 +81,16 @@ fn diskstorage_persist_bootstrap_roundtrip() {
         Column {
             name: "id".to_string(),
             dtype: DataType::Int,
+            primary_key: false,
+            unique: false,
+            not_null: false,
         },
         Column {
             name: "name".to_string(),
             dtype: DataType::Text,
+            primary_key: false,
+            unique: false,
+            not_null: false,
         },
     ]);
 
@@ -103,10 +122,16 @@ fn diskstorage_text_escape_roundtrip() {
         Column {
             name: "id".to_string(),
             dtype: DataType::Int,
+            primary_key: false,
+            unique: false,
+            not_null: false,
         },
         Column {
             name: "name".to_string(),
             dtype: DataType::Text,
+            primary_key: false,
+            unique: false,
+            not_null: false,
         },
     ]);
 
@@ -129,10 +154,16 @@ fn bootstrap_malformed_row_count_errors() {
         Column {
             name: "id".to_string(),
             dtype: DataType::Int,
+            primary_key: false,
+            unique: false,
+            not_null: false,
         },
         Column {
             name: "name".to_string(),
             dtype: DataType::Text,
+            primary_key: false,
+            unique: false,
+            not_null: false,
         },
     ]);
 
@@ -151,10 +182,16 @@ fn bootstrap_bad_type_prefix_errors() {
         Column {
             name: "id".to_string(),
             dtype: DataType::Int,
+            primary_key: false,
+            unique: false,
+            not_null: false,
         },
         Column {
             name: "name".to_string(),
             dtype: DataType::Text,
+            primary_key: false,
+            unique: false,
+            not_null: false,
         },
     ]);
 

@@ -657,6 +657,50 @@ fn test_bigint_and_decimal_comparisons() {
 }
 
 #[test]
+fn test_primary_key_constraint_insert() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key, name text)").unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    let err = db
+        .execute(r#"insert into users values (1, "alice")"#)
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("primary key"));
+}
+
+#[test]
+fn test_unique_constraint_insert() {
+    let mut db = test_db();
+    db.execute("create table users (id int, email text unique)").unwrap();
+    db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
+    let err = db
+        .execute(r#"insert into users values (2, "a@x.com")"#)
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("unique"));
+}
+
+#[test]
+fn test_not_null_constraint_insert() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text not null)").unwrap();
+    let err = db
+        .execute(r#"insert into users values (1, null)"#)
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("not null"));
+}
+
+#[test]
+fn test_unique_constraint_update() {
+    let mut db = test_db();
+    db.execute("create table users (id int, email text unique)").unwrap();
+    db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
+    db.execute(r#"insert into users values (2, "b@x.com")"#).unwrap();
+    let err = db
+        .execute(r#"update users set email = "a@x.com" where id = 2"#)
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("unique"));
+}
+
+#[test]
 fn test_persistence_reopen_insert() {
     let mut path: PathBuf = std::env::temp_dir();
     path.push(format!("skepa_db_persist_{}_insert", std::process::id()));

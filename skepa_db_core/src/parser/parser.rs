@@ -1,4 +1,4 @@
-use crate::parser::command::{Assignment, Command, CompareOp, WhereClause};
+use crate::parser::command::{Assignment, ColumnDef, Command, CompareOp, WhereClause};
 use crate::types::datatype::{DataType, parse_datatype};
 
 pub fn parse(input: &str) -> Result<Command, String> {
@@ -141,7 +141,7 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
     }
     let table = tokens[2].clone();
 
-    let mut cols: Vec<(String, DataType)> = Vec::new();
+    let mut cols: Vec<ColumnDef> = Vec::new();
     let mut i = 4usize;
     let end = tokens.len() - 1;
 
@@ -152,8 +152,16 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
         let name = tokens[i].clone();
         i += 1;
         let (dtype, next_i) = parse_datatype_in_create(tokens, i, end)?;
-        i = next_i;
-        cols.push((name, dtype));
+        let (primary_key, unique, not_null, after_constraints) =
+            parse_constraints_in_create(tokens, next_i, end)?;
+        i = after_constraints;
+        cols.push(ColumnDef {
+            name,
+            dtype,
+            primary_key,
+            unique,
+            not_null,
+        });
         if i < end {
             if tokens[i] != "," {
                 return Err("Bad CREATE column list. Columns must be comma-separated.".to_string());
@@ -432,4 +440,46 @@ fn parse_datatype_in_create(
         }
         _ => Ok((parse_datatype(&tokens[start])?, start + 1)),
     }
+}
+
+fn parse_constraints_in_create(
+    tokens: &[String],
+    mut i: usize,
+    end: usize,
+) -> Result<(bool, bool, bool, usize), String> {
+    let mut primary_key = false;
+    let mut unique = false;
+    let mut not_null = false;
+
+    while i < end && tokens[i] != "," {
+        let t = tokens[i].to_lowercase();
+        match t.as_str() {
+            "primary" => {
+                if i + 1 >= end || !tokens[i + 1].eq_ignore_ascii_case("key") {
+                    return Err("Bad PRIMARY KEY constraint. Use 'primary key'".to_string());
+                }
+                primary_key = true;
+                i += 2;
+            }
+            "unique" => {
+                unique = true;
+                i += 1;
+            }
+            "not" => {
+                if i + 1 >= end || !tokens[i + 1].eq_ignore_ascii_case("null") {
+                    return Err("Bad NOT NULL constraint. Use 'not null'".to_string());
+                }
+                not_null = true;
+                i += 2;
+            }
+            other => return Err(format!("Unknown column constraint token '{other}'")),
+        }
+    }
+
+    if primary_key {
+        unique = true;
+        not_null = true;
+    }
+
+    Ok((primary_key, unique, not_null, i))
 }

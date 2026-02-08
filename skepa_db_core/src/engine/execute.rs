@@ -1,5 +1,5 @@
 use crate::engine::format::format_select;
-use crate::parser::command::{Assignment, Command, CompareOp, WhereClause};
+use crate::parser::command::{Assignment, ColumnDef, Command, CompareOp, WhereClause};
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, Value};
@@ -31,7 +31,7 @@ pub fn execute_command(
 
 fn handle_create(
     table: String,
-    columns: Vec<(String, crate::types::datatype::DataType)>,
+    columns: Vec<ColumnDef>,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
 ) -> Result<String, String> {
@@ -59,9 +59,15 @@ fn handle_insert(
     let mut row: Row = Vec::new();
     for (i, col) in schema.columns.iter().enumerate() {
         let token = &values[i];
+        if col.not_null && token.eq_ignore_ascii_case("null") {
+            return Err(format!("Column '{}' is NOT NULL", col.name));
+        }
         let value = parse_value(&col.dtype, token)?;
         row.push(value);
     }
+
+    let rows = storage.scan(&table)?;
+    validate_unique_constraints(schema, rows, &row, None)?;
 
     storage.insert_row(&table, row)?;
     Ok(format!("inserted 1 row into {}", table))
@@ -117,8 +123,9 @@ fn handle_update(
 
     let rows = storage.scan_mut(&table)?;
     let mut updated = 0usize;
+    let mut new_rows = rows.clone();
 
-    for row in rows.iter_mut() {
+    for row in new_rows.iter_mut() {
         let cell = row
             .get(where_idx)
             .ok_or_else(|| format!("Row is missing value for column '{}'", filter.column))?;
@@ -132,6 +139,9 @@ fn handle_update(
             updated += 1;
         }
     }
+
+    validate_all_unique_constraints(schema, &new_rows)?;
+    *rows = new_rows;
 
     Ok(format!("updated {} row(s) in {}", updated, table))
 }
@@ -251,6 +261,39 @@ fn row_matches(
         .get(col_idx)
         .ok_or_else(|| format!("Row is missing value for column '{}'", col_name))?;
     matches_where(cell, col_dtype, op, rhs_token)
+}
+
+fn validate_unique_constraints(
+    schema: &Schema,
+    rows: &[Row],
+    candidate: &Row,
+    skip_idx: Option<usize>,
+) -> Result<(), String> {
+    for (col_idx, col) in schema.columns.iter().enumerate() {
+        if !col.unique && !col.primary_key {
+            continue;
+        }
+        for (row_idx, existing) in rows.iter().enumerate() {
+            if skip_idx == Some(row_idx) {
+                continue;
+            }
+            if existing.get(col_idx) == candidate.get(col_idx) {
+                let kind = if col.primary_key { "PRIMARY KEY" } else { "UNIQUE" };
+                return Err(format!(
+                    "{} constraint violation on column '{}'",
+                    kind, col.name
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_all_unique_constraints(schema: &Schema, rows: &[Row]) -> Result<(), String> {
+    for idx in 0..rows.len() {
+        validate_unique_constraints(schema, rows, &rows[idx], Some(idx))?;
+    }
+    Ok(())
 }
 
 fn matches_where(cell: &Value, dtype: &DataType, op: &CompareOp, rhs_token: &str) -> Result<bool, String> {

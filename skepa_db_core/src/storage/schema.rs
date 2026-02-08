@@ -5,6 +5,9 @@ use crate::types::datatype::DataType;
 pub struct Column {
     pub name: String,
     pub dtype: DataType,
+    pub primary_key: bool,
+    pub unique: bool,
+    pub not_null: bool,
 }
 
 /// Represents the schema of a table (list of columns)

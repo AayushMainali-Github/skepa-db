@@ -10,10 +10,10 @@ fn parse_create_basic() {
         Command::Create { table, columns } => {
             assert_eq!(table, "users");
             assert_eq!(columns.len(), 2);
-            assert_eq!(columns[0].0, "id");
-            assert_eq!(columns[0].1, DataType::Int);
-            assert_eq!(columns[1].0, "name");
-            assert_eq!(columns[1].1, DataType::Text);
+            assert_eq!(columns[0].name, "id");
+            assert_eq!(columns[0].dtype, DataType::Int);
+            assert_eq!(columns[1].name, "name");
+            assert_eq!(columns[1].dtype, DataType::Text);
         }
         _ => panic!("Expected Create command"),
     }
@@ -226,7 +226,10 @@ fn parse_unknown_command_errors() {
 #[test]
 fn parse_bad_column_def_errors() {
     let err = parse("create table users (id text bad)").unwrap_err();
-    assert!(err.to_lowercase().contains("bad create"));
+    assert!(
+        err.to_lowercase().contains("bad create")
+            || err.to_lowercase().contains("unknown column constraint")
+    );
 }
 
 #[test]
@@ -371,7 +374,10 @@ fn create_requires_parentheses() {
 #[test]
 fn create_requires_commas_between_columns() {
     let err = parse("create table users (id int name text)").unwrap_err();
-    assert!(err.to_lowercase().contains("comma"));
+    assert!(
+        err.to_lowercase().contains("comma")
+            || err.to_lowercase().contains("unknown column constraint")
+    );
 }
 
 #[test]
@@ -547,6 +553,24 @@ fn parse_create_with_extended_types() {
         Command::Create { table, columns } => {
             assert_eq!(table, "t");
             assert_eq!(columns.len(), 11);
+        }
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_with_constraints() {
+    let cmd =
+        parse("create table users (id int primary key, email text unique, name text not null)")
+            .unwrap();
+    match cmd {
+        Command::Create { columns, .. } => {
+            assert!(columns[0].primary_key);
+            assert!(columns[0].unique);
+            assert!(columns[0].not_null);
+            assert!(columns[1].unique);
+            assert!(!columns[1].primary_key);
+            assert!(columns[2].not_null);
         }
         _ => panic!("Expected Create command"),
     }

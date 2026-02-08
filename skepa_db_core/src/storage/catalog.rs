@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use crate::parser::command::ColumnDef;
 use crate::types::datatype::DataType;
 use crate::storage::schema::{Schema, Column};
 
@@ -20,6 +21,12 @@ struct CatalogFile {
 struct ColumnFile {
     name: String,
     dtype: String,
+    #[serde(default)]
+    primary_key: bool,
+    #[serde(default)]
+    unique: bool,
+    #[serde(default)]
+    not_null: bool,
 }
 
 impl Catalog {
@@ -40,15 +47,26 @@ impl Catalog {
     pub fn create_table(
         &mut self,
         table: String,
-        cols: Vec<(String, DataType)>,
+        cols: Vec<ColumnDef>,
     ) -> Result<(), String> {
         if self.exists(&table) {
             return Err(format!("Table '{}' already exists", table));
         }
 
+        let pk_count = cols.iter().filter(|c| c.primary_key).count();
+        if pk_count > 1 {
+            return Err("Only one PRIMARY KEY column is supported".to_string());
+        }
+
         let columns: Vec<Column> = cols
             .into_iter()
-            .map(|(name, dtype)| Column { name, dtype })
+            .map(|c| Column {
+                name: c.name,
+                dtype: c.dtype,
+                primary_key: c.primary_key,
+                unique: c.unique,
+                not_null: c.not_null,
+            })
             .collect();
 
         let schema = Schema::new(columns);
@@ -98,6 +116,9 @@ impl Catalog {
                     ColumnFile {
                         name: c.name.clone(),
                         dtype,
+                        primary_key: c.primary_key,
+                        unique: c.unique,
+                        not_null: c.not_null,
                     }
                 })
                 .collect();
@@ -130,6 +151,9 @@ impl Catalog {
                 columns.push(Column {
                     name: c.name,
                     dtype,
+                    primary_key: c.primary_key,
+                    unique: c.unique,
+                    not_null: c.not_null,
                 });
             }
             tables.insert(table, Schema::new(columns));
