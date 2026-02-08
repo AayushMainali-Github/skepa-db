@@ -701,6 +701,72 @@ fn test_unique_constraint_update() {
 }
 
 #[test]
+fn test_multiple_primary_keys_rejected() {
+    let mut db = test_db();
+    let err = db
+        .execute("create table t (id int primary key, code int primary key)")
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("only one primary key"));
+}
+
+#[test]
+fn test_primary_key_rejects_null_insert() {
+    let mut db = test_db();
+    db.execute("create table t (id int primary key, name text)").unwrap();
+    let err = db.execute(r#"insert into t values (null, "ram")"#).unwrap_err();
+    assert!(err.to_lowercase().contains("not null"));
+}
+
+#[test]
+fn test_not_null_rejects_null_on_update() {
+    let mut db = test_db();
+    db.execute("create table t (id int primary key, name text not null)").unwrap();
+    db.execute(r#"insert into t values (1, "ram")"#).unwrap();
+    let err = db.execute("update t set name = null where id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("not null"));
+}
+
+#[test]
+fn test_primary_key_violation_on_update() {
+    let mut db = test_db();
+    db.execute("create table t (id int primary key, name text)").unwrap();
+    db.execute(r#"insert into t values (1, "a")"#).unwrap();
+    db.execute(r#"insert into t values (2, "b")"#).unwrap();
+    let err = db.execute("update t set id = 1 where id = 2").unwrap_err();
+    assert!(err.to_lowercase().contains("primary key"));
+}
+
+#[test]
+fn test_constraint_persistence_after_reopen() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_constraints_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (id int primary key, email text unique, name text not null)")
+            .unwrap();
+        db.execute(r#"insert into t values (1, "a@x.com", "ram")"#).unwrap();
+    }
+    {
+        let mut db = Database::open(path.clone());
+        let e1 = db
+            .execute(r#"insert into t values (1, "b@x.com", "bob")"#)
+            .unwrap_err();
+        assert!(e1.to_lowercase().contains("primary key"));
+        let e2 = db
+            .execute(r#"insert into t values (2, "a@x.com", "bob")"#)
+            .unwrap_err();
+        assert!(e2.to_lowercase().contains("unique"));
+        let e3 = db
+            .execute(r#"insert into t values (3, "c@x.com", null)"#)
+            .unwrap_err();
+        assert!(e3.to_lowercase().contains("not null"));
+    }
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
 fn test_persistence_reopen_insert() {
     let mut path: PathBuf = std::env::temp_dir();
     path.push(format!("skepa_db_persist_{}_insert", std::process::id()));

@@ -577,6 +577,25 @@ fn parse_create_with_constraints() {
 }
 
 #[test]
+fn parse_primary_key_implies_unique_and_not_null() {
+    let cmd = parse("create table t (id int primary key)").unwrap();
+    match cmd {
+        Command::Create { columns, .. } => {
+            assert!(columns[0].primary_key);
+            assert!(columns[0].unique);
+            assert!(columns[0].not_null);
+        }
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_unknown_constraint_token_errors() {
+    let err = parse("create table t (id int indexed)").unwrap_err();
+    assert!(err.to_lowercase().contains("unknown column constraint"));
+}
+
+#[test]
 fn parse_create_bad_decimal_params_errors() {
     let err = parse("create table t (d decimal(2,5))").unwrap_err();
     assert!(err.to_lowercase().contains("scale"));

@@ -109,6 +109,9 @@ fn handle_update(
             .iter()
             .position(|c| c.name == a.column)
             .ok_or_else(|| format!("Unknown column '{}' in UPDATE", a.column))?;
+        if schema.columns[idx].not_null && a.value.eq_ignore_ascii_case("null") {
+            return Err(format!("Column '{}' is NOT NULL", schema.columns[idx].name));
+        }
         let dtype = &schema.columns[idx].dtype;
         let parsed = parse_value(dtype, &a.value)?;
         compiled.push((idx, parsed));
