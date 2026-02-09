@@ -489,8 +489,8 @@ fn duplicate_key_in_index_snapshot_self_heals() {
     "cols": [],
     "col_idxs": [0],
     "entries": [
-      { "key": "1:1;", "row_idx": 0 },
-      { "key": "1:1;", "row_idx": 1 }
+      { "key": "1:1;", "row_id": 1 },
+      { "key": "1:1;", "row_id": 2 }
     ]
   },
   "unique": []
@@ -527,7 +527,7 @@ fn out_of_range_row_pointer_in_index_snapshot_self_heals() {
     "cols": [],
     "col_idxs": [0],
     "entries": [
-      { "key": "1:1;", "row_idx": 99 }
+      { "key": "1:1;", "row_id": 99 }
     ]
   },
   "unique": []
@@ -544,7 +544,7 @@ fn out_of_range_row_pointer_in_index_snapshot_self_heals() {
     }
 
     let healed = std::fs::read_to_string(path.join("indexes").join("users.indexes.json")).unwrap();
-    assert!(healed.contains(r#""row_idx": 0"#));
+    assert!(healed.contains(r#""row_id": 1"#));
 }
 
 #[test]

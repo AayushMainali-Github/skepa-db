@@ -26,14 +26,14 @@ pub struct DiskStorage {
 #[derive(Debug, Clone)]
 struct PrimaryIndex {
     col_idxs: Vec<usize>,
-    map: BTreeMap<String, usize>,
+    map: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone)]
 struct UniqueIndex {
     cols: Vec<String>,
     col_idxs: Vec<usize>,
-    map: BTreeMap<String, usize>,
+    map: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,7 +57,7 @@ struct IndexSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct IndexEntry {
     key: String,
-    row_idx: usize,
+    row_id: u64,
 }
 
 impl DiskStorage {
@@ -309,10 +309,11 @@ impl StorageEngine for DiskStorage {
         let dtype = &schema.columns[col_idx].dtype;
         let rhs = parse_value(dtype, rhs_token)?;
         let key = encode_key_parts(&[value_to_string(&rhs)]);
-        Ok(self
+        let row_id = self
             .pk_indexes
             .get(table)
-            .and_then(|idx| if idx.col_idxs.as_slice() == [col_idx] { idx.map.get(&key).copied() } else { None }))
+            .and_then(|idx| if idx.col_idxs.as_slice() == [col_idx] { idx.map.get(&key).copied() } else { None });
+        Ok(row_id.and_then(|rid| self.row_index_by_id(table, rid)))
     }
 
     fn rebuild_indexes(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
@@ -345,9 +346,12 @@ impl StorageEngine for DiskStorage {
             .collect::<Result<Vec<_>, _>>()?;
         let key = encode_key_parts(&parts);
         let hit = idx.map.get(&key).copied();
+        let skip_row_id = skip_idx
+            .and_then(|i| self.row_ids.get(table).and_then(|ids| ids.get(i).copied()));
         Ok(match (hit, skip_idx) {
-            (Some(found), Some(skip)) if found == skip => None,
-            (other, _) => other,
+            (Some(found), Some(_)) if skip_row_id == Some(found) => None,
+            (Some(found), _) => self.row_index_by_id(table, found),
+            (None, _) => None,
         })
     }
 
@@ -374,7 +378,8 @@ impl StorageEngine for DiskStorage {
         let dtype = &schema.columns[col_idx].dtype;
         let rhs = parse_value(dtype, rhs_token)?;
         let key = encode_key_parts(&[value_to_string(&rhs)]);
-        Ok(idx.map.get(&key).copied())
+        let row_id = idx.map.get(&key).copied();
+        Ok(row_id.and_then(|rid| self.row_index_by_id(table, rid)))
     }
 
     fn lookup_unique_conflict(
@@ -401,7 +406,9 @@ impl StorageEngine for DiskStorage {
                 .collect::<Result<Vec<_>, _>>()?;
             let key = encode_key_parts(&parts);
             if let Some(found) = idx.map.get(&key).copied() {
-                if skip_idx != Some(found) {
+                let skip_row_id = skip_idx
+                    .and_then(|i| self.row_ids.get(table).and_then(|ids| ids.get(i).copied()));
+                if skip_row_id != Some(found) {
                     return Ok(Some(idx.cols.clone()));
                 }
             }
@@ -411,6 +418,12 @@ impl StorageEngine for DiskStorage {
 }
 
 impl DiskStorage {
+    fn row_index_by_id(&self, table: &str, row_id: u64) -> Option<usize> {
+        self.row_ids
+            .get(table)
+            .and_then(|ids| ids.iter().position(|id| *id == row_id))
+    }
+
     fn persist_indexes(&self, table: &str) -> Result<(), String> {
         let pk = self.pk_indexes.get(table).map(|idx| IndexSnapshot {
             cols: Vec::new(),
@@ -420,7 +433,7 @@ impl DiskStorage {
                 .iter()
                 .map(|(k, v)| IndexEntry {
                     key: k.clone(),
-                    row_idx: *v,
+                    row_id: *v,
                 })
                 .collect(),
         });
@@ -437,7 +450,7 @@ impl DiskStorage {
                 entries: u
                     .map
                     .into_iter()
-                    .map(|(k, v)| IndexEntry { key: k, row_idx: v })
+                    .map(|(k, v)| IndexEntry { key: k, row_id: v })
                     .collect(),
             })
             .collect::<Vec<_>>();
@@ -463,17 +476,17 @@ impl DiskStorage {
 
         self.rebuild_indexes_internal(table, schema)?;
 
-        let row_len = self
-            .tables
+        let row_ids = self
+            .row_ids
             .get(table)
-            .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?
-            .len();
+            .ok_or_else(|| format!("Table '{}' row ids are missing in storage", table))?
+            .clone();
 
         let mut should_heal = false;
 
         if let (Some(idx), Some(snap)) = (self.pk_indexes.get_mut(table), snapshot.pk) {
             if idx.col_idxs == snap.col_idxs {
-                match validate_snapshot_entries(snap.entries, row_len) {
+                match validate_snapshot_entries(snap.entries, &row_ids) {
                     Ok(map) => idx.map = map,
                     Err(_) => should_heal = true,
                 }
@@ -489,7 +502,7 @@ impl DiskStorage {
                     .iter()
                     .find(|s| s.col_idxs == u.col_idxs && s.cols == u.cols)
                 {
-                    match validate_snapshot_entries(su.entries.clone(), row_len) {
+                    match validate_snapshot_entries(su.entries.clone(), &row_ids) {
                         Ok(map) => u.map = map,
                         Err(_) => should_heal = true,
                     }
@@ -527,7 +540,11 @@ impl DiskStorage {
             .tables
             .get(table)
             .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?;
-        let mut map: BTreeMap<String, usize> = BTreeMap::new();
+        let ids = self
+            .row_ids
+            .get(table)
+            .ok_or_else(|| format!("Table '{}' row ids are missing", table))?;
+        let mut map: BTreeMap<String, u64> = BTreeMap::new();
         for (row_idx, row) in rows.iter().enumerate() {
             let mut parts: Vec<String> = Vec::new();
             for (i, pk_col) in col_idxs.iter().zip(schema.primary_key.iter()) {
@@ -536,7 +553,10 @@ impl DiskStorage {
                     .ok_or_else(|| format!("Row is missing PK column '{}'", pk_col))?;
                 parts.push(value_to_string(v));
             }
-            map.insert(encode_key_parts(&parts), row_idx);
+            let row_id = *ids
+                .get(row_idx)
+                .ok_or_else(|| format!("Table '{}' row-id alignment is corrupted", table))?;
+            map.insert(encode_key_parts(&parts), row_id);
         }
         self.pk_indexes
             .insert(table.to_string(), PrimaryIndex { col_idxs, map });
@@ -548,6 +568,10 @@ impl DiskStorage {
             .tables
             .get(table)
             .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?;
+        let ids = self
+            .row_ids
+            .get(table)
+            .ok_or_else(|| format!("Table '{}' row ids are missing", table))?;
         let groups = unique_groups(schema)?;
         if groups.is_empty() {
             self.unique_indexes.remove(table);
@@ -564,7 +588,7 @@ impl DiskStorage {
                     .ok_or_else(|| format!("Unknown UNIQUE column '{}'", c))?;
                 col_idxs.push(i);
             }
-            let mut map: BTreeMap<String, usize> = BTreeMap::new();
+            let mut map: BTreeMap<String, u64> = BTreeMap::new();
             for (row_idx, row) in rows.iter().enumerate() {
                 let parts = col_idxs
                     .iter()
@@ -574,7 +598,10 @@ impl DiskStorage {
                             .ok_or_else(|| "Row missing UNIQUE column".to_string())
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                map.insert(encode_key_parts(&parts), row_idx);
+                let row_id = *ids
+                    .get(row_idx)
+                    .ok_or_else(|| format!("Table '{}' row-id alignment is corrupted", table))?;
+                map.insert(encode_key_parts(&parts), row_id);
             }
             indexes.push(UniqueIndex { cols, col_idxs, map });
         }
@@ -629,14 +656,15 @@ fn parse_row_id_prefix(token: &str) -> Option<u64> {
 
 fn validate_snapshot_entries(
     entries: Vec<IndexEntry>,
-    row_len: usize,
-) -> Result<BTreeMap<String, usize>, String> {
+    known_row_ids: &[u64],
+) -> Result<BTreeMap<String, u64>, String> {
+    let known: std::collections::HashSet<u64> = known_row_ids.iter().copied().collect();
     let mut out = BTreeMap::new();
     for e in entries {
-        if e.row_idx >= row_len {
-            return Err("Index entry row pointer out of range".to_string());
+        if !known.contains(&e.row_id) {
+            return Err("Index entry row id is not present".to_string());
         }
-        if out.insert(e.key, e.row_idx).is_some() {
+        if out.insert(e.key, e.row_id).is_some() {
             return Err("Duplicate key in index snapshot".to_string());
         }
     }
