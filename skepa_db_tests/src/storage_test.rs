@@ -424,3 +424,48 @@ fn recovery_ignores_commit_for_unknown_transaction() {
         assert_eq!(out, "id\tname");
     }
 }
+
+#[test]
+fn index_snapshot_file_is_written_on_persist() {
+    let path = temp_dir("index_snapshot_written");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int primary key, email text unique, name text)")
+            .unwrap();
+        db.execute(r#"insert into users values (1, "a@x.com", "a")"#).unwrap();
+        db.execute(r#"insert into users values (2, "b@x.com", "b")"#).unwrap();
+    }
+
+    let idx_path = path.join("indexes").join("users.indexes.json");
+    let content = std::fs::read_to_string(idx_path).unwrap();
+    assert!(!content.trim().is_empty());
+    assert!(content.contains("\"pk\""));
+    assert!(content.contains("\"unique\""));
+}
+
+#[test]
+fn corrupt_index_file_falls_back_to_rebuild_on_open() {
+    let path = temp_dir("index_corrupt_fallback");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int primary key, email text unique)")
+            .unwrap();
+        db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
+        db.execute(r#"insert into users values (2, "b@x.com")"#).unwrap();
+    }
+
+    // Corrupt index snapshot; bootstrap should rebuild from rows.
+    std::fs::write(path.join("indexes").join("users.indexes.json"), "{bad json").unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(
+            db.execute(r#"select * from users where id = 2"#).unwrap(),
+            "id\temail\n2\tb@x.com"
+        );
+        assert_eq!(
+            db.execute(r#"select * from users where email = "a@x.com""#).unwrap(),
+            "id\temail\n1\ta@x.com"
+        );
+    }
+}

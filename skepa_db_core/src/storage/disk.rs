@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
+use serde::{Deserialize, Serialize};
 
 use crate::storage::engine::StorageEngine;
 use crate::storage::Schema;
@@ -33,6 +34,30 @@ struct UniqueIndex {
     map: BTreeMap<String, usize>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct TableIndexSnapshot {
+    #[serde(default)]
+    pk: Option<IndexSnapshot>,
+    #[serde(default)]
+    unique: Vec<IndexSnapshot>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IndexSnapshot {
+    #[serde(default)]
+    cols: Vec<String>,
+    #[serde(default)]
+    col_idxs: Vec<usize>,
+    #[serde(default)]
+    entries: Vec<IndexEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IndexEntry {
+    key: String,
+    row_idx: usize,
+}
+
 impl DiskStorage {
     pub fn new(root: impl Into<PathBuf>) -> Result<Self, String> {
         let root = root.into();
@@ -47,6 +72,10 @@ impl DiskStorage {
 
     fn table_file_path(&self, table: &str) -> PathBuf {
         self.root.join("tables").join(format!("{table}.rows"))
+    }
+
+    fn index_file_path(&self, table: &str) -> PathBuf {
+        self.root.join("indexes").join(format!("{table}.indexes.json"))
     }
 
     pub fn bootstrap_table(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
@@ -88,7 +117,9 @@ impl DiskStorage {
         }
 
         self.tables.insert(table.to_string(), rows);
-        self.rebuild_indexes_internal(table, schema)?;
+        if self.load_indexes_from_disk(table, schema).is_err() {
+            self.rebuild_indexes_internal(table, schema)?;
+        }
         Ok(())
     }
 
@@ -122,7 +153,8 @@ impl DiskStorage {
             format!("{}\n", lines.join("\n"))
         };
         fs::write(table_file, payload)
-            .map_err(|e| format!("Failed to write table snapshot for '{table}': {e}"))
+            .map_err(|e| format!("Failed to write table snapshot for '{table}': {e}"))?;
+        self.persist_indexes(table)
     }
 }
 
@@ -130,6 +162,8 @@ fn initialize_layout(root: &Path) -> Result<(), String> {
     fs::create_dir_all(root).map_err(|e| format!("Failed to create db directory: {e}"))?;
     fs::create_dir_all(root.join("tables"))
         .map_err(|e| format!("Failed to create tables directory: {e}"))?;
+    fs::create_dir_all(root.join("indexes"))
+        .map_err(|e| format!("Failed to create indexes directory: {e}"))?;
 
     let catalog = root.join("catalog.json");
     if !catalog.exists() {
@@ -156,6 +190,12 @@ impl StorageEngine for DiskStorage {
             .write(true)
             .open(table_file)
             .map_err(|e| format!("Failed to create table file for '{table}': {e}"))?;
+        OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(self.index_file_path(table))
+            .map_err(|e| format!("Failed to create index file for '{table}': {e}"))?;
         self.tables.insert(table.to_string(), Vec::new());
         self.pk_indexes.remove(table);
         self.unique_indexes.remove(table);
@@ -305,6 +345,94 @@ impl StorageEngine for DiskStorage {
 }
 
 impl DiskStorage {
+    fn persist_indexes(&self, table: &str) -> Result<(), String> {
+        let pk = self.pk_indexes.get(table).map(|idx| IndexSnapshot {
+            cols: Vec::new(),
+            col_idxs: idx.col_idxs.clone(),
+            entries: idx
+                .map
+                .iter()
+                .map(|(k, v)| IndexEntry {
+                    key: k.clone(),
+                    row_idx: *v,
+                })
+                .collect(),
+        });
+
+        let unique = self
+            .unique_indexes
+            .get(table)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|u| IndexSnapshot {
+                cols: u.cols,
+                col_idxs: u.col_idxs,
+                entries: u
+                    .map
+                    .into_iter()
+                    .map(|(k, v)| IndexEntry { key: k, row_idx: v })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+
+        let payload = serde_json::to_string_pretty(&TableIndexSnapshot { pk, unique })
+            .map_err(|e| format!("Failed to serialize indexes for '{table}': {e}"))?;
+        fs::write(self.index_file_path(table), payload)
+            .map_err(|e| format!("Failed to write index file for '{table}': {e}"))
+    }
+
+    fn load_indexes_from_disk(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
+        let path = self.index_file_path(table);
+        if !path.exists() {
+            return Err("Index file missing".to_string());
+        }
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read index file for '{table}': {e}"))?;
+        if content.trim().is_empty() {
+            return Err("Index file is empty".to_string());
+        }
+        let snapshot: TableIndexSnapshot = serde_json::from_str(&content)
+            .map_err(|e| format!("Malformed index file for '{table}': {e}"))?;
+
+        self.rebuild_indexes_internal(table, schema)?;
+
+        let row_len = self
+            .tables
+            .get(table)
+            .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?
+            .len();
+
+        if let (Some(idx), Some(snap)) = (self.pk_indexes.get_mut(table), snapshot.pk) {
+            if idx.col_idxs == snap.col_idxs {
+                idx.map = snap
+                    .entries
+                    .into_iter()
+                    .filter(|e| e.row_idx < row_len)
+                    .map(|e| (e.key, e.row_idx))
+                    .collect();
+            }
+        }
+
+        if let Some(existing) = self.unique_indexes.get_mut(table) {
+            for u in existing {
+                if let Some(su) = snapshot
+                    .unique
+                    .iter()
+                    .find(|s| s.col_idxs == u.col_idxs && s.cols == u.cols)
+                {
+                    u.map = su
+                        .entries
+                        .iter()
+                        .filter(|e| e.row_idx < row_len)
+                        .map(|e| (e.key.clone(), e.row_idx))
+                        .collect();
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn rebuild_indexes_internal(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
         self.rebuild_primary_index(table, schema)?;
         self.rebuild_unique_indexes(table, schema)
