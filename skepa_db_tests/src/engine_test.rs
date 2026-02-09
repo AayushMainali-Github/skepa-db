@@ -1184,3 +1184,149 @@ fn test_unique_update_reindexes_for_future_unique_lookup() {
     );
 }
 
+#[test]
+fn test_update_pk_eq_no_match_returns_zero() {
+    let mut db = test_db();
+    db.execute("create table t (id int primary key, v int)").unwrap();
+    db.execute("insert into t values (1, 10)").unwrap();
+    let out = db.execute("update t set v = 99 where id = 999").unwrap();
+    assert_eq!(out, "updated 0 row(s) in t");
+}
+
+#[test]
+fn test_delete_pk_eq_no_match_returns_zero() {
+    let mut db = test_db();
+    db.execute("create table t (id int primary key, v int)").unwrap();
+    db.execute("insert into t values (1, 10)").unwrap();
+    let out = db.execute("delete from t where id = 999").unwrap();
+    assert_eq!(out, "deleted 0 row(s) from t");
+}
+
+#[test]
+fn test_select_unique_eq_no_match_header_only() {
+    let mut db = test_db();
+    db.execute("create table t (id int, email text unique)").unwrap();
+    db.execute(r#"insert into t values (1, "a@x.com")"#).unwrap();
+    let out = db.execute(r#"select * from t where email = "x@x.com""#).unwrap();
+    assert_eq!(out, "id\temail");
+}
+
+#[test]
+fn test_update_unique_eq_no_match_returns_zero() {
+    let mut db = test_db();
+    db.execute("create table t (id int, email text unique, v int)").unwrap();
+    db.execute(r#"insert into t values (1, "a@x.com", 1)"#).unwrap();
+    let out = db
+        .execute(r#"update t set v = 2 where email = "x@x.com""#)
+        .unwrap();
+    assert_eq!(out, "updated 0 row(s) in t");
+}
+
+#[test]
+fn test_delete_unique_eq_no_match_returns_zero() {
+    let mut db = test_db();
+    db.execute("create table t (id int, email text unique)").unwrap();
+    db.execute(r#"insert into t values (1, "a@x.com")"#).unwrap();
+    let out = db
+        .execute(r#"delete from t where email = "x@x.com""#)
+        .unwrap();
+    assert_eq!(out, "deleted 0 row(s) from t");
+}
+
+#[test]
+fn test_composite_unique_insert_duplicate_rejected_after_many_rows() {
+    let mut db = test_db();
+    db.execute("create table t (a int, b int, c int, unique(a,b))")
+        .unwrap();
+    for i in 0..20 {
+        db.execute(&format!("insert into t values ({}, {}, {})", i, i + 1, i + 2))
+            .unwrap();
+    }
+    let err = db.execute("insert into t values (5, 6, 999)").unwrap_err();
+    assert!(err.to_lowercase().contains("unique"));
+}
+
+#[test]
+fn test_composite_unique_update_to_duplicate_rejected() {
+    let mut db = test_db();
+    db.execute("create table t (a int, b int, unique(a,b))").unwrap();
+    db.execute("insert into t values (1, 1)").unwrap();
+    db.execute("insert into t values (2, 2)").unwrap();
+    let err = db.execute("update t set a = 1, b = 1 where a = 2").unwrap_err();
+    assert!(err.to_lowercase().contains("unique"));
+}
+
+#[test]
+fn test_transaction_multiple_updates_then_rollback() {
+    let mut db = test_db();
+    db.execute("create table t (id int primary key, v int)").unwrap();
+    db.execute("insert into t values (1, 10)").unwrap();
+    db.execute("insert into t values (2, 20)").unwrap();
+    db.execute("begin").unwrap();
+    db.execute("update t set v = 11 where id = 1").unwrap();
+    db.execute("update t set v = 22 where id = 2").unwrap();
+    db.execute("rollback").unwrap();
+    assert_eq!(db.execute("select * from t").unwrap(), "id\tv\n1\t10\n2\t20");
+}
+
+#[test]
+fn test_transaction_multiple_deletes_then_rollback() {
+    let mut db = test_db();
+    db.execute("create table t (id int primary key, v int)").unwrap();
+    db.execute("insert into t values (1, 10)").unwrap();
+    db.execute("insert into t values (2, 20)").unwrap();
+    db.execute("begin").unwrap();
+    db.execute("delete from t where id = 1").unwrap();
+    db.execute("delete from t where id = 2").unwrap();
+    db.execute("rollback").unwrap();
+    assert_eq!(db.execute("select * from t").unwrap(), "id\tv\n1\t10\n2\t20");
+}
+
+#[test]
+fn test_transaction_commit_then_new_begin_allowed() {
+    let mut db = test_db();
+    db.execute("create table t (id int)").unwrap();
+    db.execute("begin").unwrap();
+    db.execute("commit").unwrap();
+    let out = db.execute("begin").unwrap();
+    assert_eq!(out, "transaction started");
+}
+
+#[test]
+fn test_transaction_rollback_then_new_begin_allowed() {
+    let mut db = test_db();
+    db.execute("create table t (id int)").unwrap();
+    db.execute("begin").unwrap();
+    db.execute("rollback").unwrap();
+    let out = db.execute("begin").unwrap();
+    assert_eq!(out, "transaction started");
+}
+
+#[test]
+fn test_select_on_table_with_one_column() {
+    let mut db = test_db();
+    db.execute("create table t (id int)").unwrap();
+    db.execute("insert into t values (1)").unwrap();
+    assert_eq!(db.execute("select * from t").unwrap(), "id\n1");
+}
+
+#[test]
+fn test_update_same_value_still_reports_updated_row() {
+    let mut db = test_db();
+    db.execute("create table t (id int, v int)").unwrap();
+    db.execute("insert into t values (1, 10)").unwrap();
+    let out = db.execute("update t set v = 10 where id = 1").unwrap();
+    assert_eq!(out, "updated 1 row(s) in t");
+}
+
+#[test]
+fn test_delete_all_rows_using_like_star_then_insert_again() {
+    let mut db = test_db();
+    db.execute("create table t (id int, name text)").unwrap();
+    db.execute(r#"insert into t values (1, "a")"#).unwrap();
+    db.execute(r#"insert into t values (2, "b")"#).unwrap();
+    db.execute(r#"delete from t where name like "*""#).unwrap();
+    db.execute(r#"insert into t values (3, "c")"#).unwrap();
+    assert_eq!(db.execute("select * from t").unwrap(), "id\tname\n3\tc");
+}
+

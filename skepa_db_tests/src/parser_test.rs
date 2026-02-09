@@ -682,3 +682,414 @@ fn parse_like_operator_on_select_is_case_insensitive_keyword() {
         _ => panic!("Expected Select command"),
     }
 }
+
+macro_rules! parse_select_op_test {
+    ($name:ident, $op:expr, $expected:expr) => {
+        #[test]
+        fn $name() {
+            let cmd = parse(&format!("select * from t where a {} 1", $op)).unwrap();
+            match cmd {
+                Command::Select { filter, .. } => {
+                    assert_eq!(filter.expect("where").op, $expected);
+                }
+                _ => panic!("Expected Select command"),
+            }
+        }
+    };
+}
+
+parse_select_op_test!(parse_select_op_eq_symbol, "=", CompareOp::Eq);
+parse_select_op_test!(parse_select_op_eq_word, "eq", CompareOp::Eq);
+parse_select_op_test!(parse_select_op_gt_symbol, ">", CompareOp::Gt);
+parse_select_op_test!(parse_select_op_gt_word, "gt", CompareOp::Gt);
+parse_select_op_test!(parse_select_op_lt_symbol, "<", CompareOp::Lt);
+parse_select_op_test!(parse_select_op_lt_word, "lt", CompareOp::Lt);
+parse_select_op_test!(parse_select_op_gte_symbol, ">=", CompareOp::Gte);
+parse_select_op_test!(parse_select_op_gte_word, "gte", CompareOp::Gte);
+parse_select_op_test!(parse_select_op_lte_symbol, "<=", CompareOp::Lte);
+parse_select_op_test!(parse_select_op_lte_word, "lte", CompareOp::Lte);
+parse_select_op_test!(parse_select_op_like_lower, "like", CompareOp::Like);
+parse_select_op_test!(parse_select_op_like_mixed, "LiKe", CompareOp::Like);
+
+#[test]
+fn parse_keyword_case_insensitive_create() {
+    let cmd = parse("CrEaTe TaBlE t (id int)").unwrap();
+    match cmd {
+        Command::Create { table, columns, .. } => {
+            assert_eq!(table, "t");
+            assert_eq!(columns.len(), 1);
+        }
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_keyword_case_insensitive_insert() {
+    let cmd = parse(r#"InSeRt InTo t VaLuEs (1)"#).unwrap();
+    match cmd {
+        Command::Insert { table, values } => {
+            assert_eq!(table, "t");
+            assert_eq!(values, vec!["1"]);
+        }
+        _ => panic!("Expected Insert command"),
+    }
+}
+
+#[test]
+fn parse_keyword_case_insensitive_update() {
+    let cmd = parse("UpDaTe t SeT a = 1 WhErE id = 2").unwrap();
+    match cmd {
+        Command::Update { table, .. } => assert_eq!(table, "t"),
+        _ => panic!("Expected Update command"),
+    }
+}
+
+#[test]
+fn parse_keyword_case_insensitive_delete() {
+    let cmd = parse("DeLeTe FrOm t WhErE id = 1").unwrap();
+    match cmd {
+        Command::Delete { table, .. } => assert_eq!(table, "t"),
+        _ => panic!("Expected Delete command"),
+    }
+}
+
+#[test]
+fn parse_keyword_case_insensitive_select() {
+    let cmd = parse("SeLeCt * FrOm t").unwrap();
+    match cmd {
+        Command::Select { table, .. } => assert_eq!(table, "t"),
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_insert_single_value() {
+    let cmd = parse("insert into t values (1)").unwrap();
+    match cmd {
+        Command::Insert { values, .. } => assert_eq!(values, vec!["1"]),
+        _ => panic!("Expected Insert command"),
+    }
+}
+
+#[test]
+fn parse_insert_blob_value_token() {
+    let cmd = parse("insert into t values (0xABCD)").unwrap();
+    match cmd {
+        Command::Insert { values, .. } => assert_eq!(values, vec!["0xABCD"]),
+        _ => panic!("Expected Insert command"),
+    }
+}
+
+#[test]
+fn parse_insert_json_quoted_value() {
+    let cmd = parse(r#"insert into t values ("{\"a\":1}")"#).unwrap();
+    match cmd {
+        Command::Insert { values, .. } => assert_eq!(values, vec![r#"{"a":1}"#]),
+        _ => panic!("Expected Insert command"),
+    }
+}
+
+#[test]
+fn parse_update_set_two_columns_no_spaces_after_comma() {
+    let cmd = parse("update t set a=1,b=2 where id=3").unwrap();
+    match cmd {
+        Command::Update { assignments, .. } => {
+            assert_eq!(assignments.len(), 2);
+            assert_eq!(assignments[0].column, "a");
+            assert_eq!(assignments[1].column, "b");
+        }
+        _ => panic!("Expected Update command"),
+    }
+}
+
+#[test]
+fn parse_update_where_like_operator() {
+    let cmd = parse(r#"update t set name = "x" where name like "a*""#).unwrap();
+    match cmd {
+        Command::Update { filter, .. } => assert_eq!(filter.op, CompareOp::Like),
+        _ => panic!("Expected Update command"),
+    }
+}
+
+#[test]
+fn parse_delete_where_like_operator() {
+    let cmd = parse(r#"delete from t where name like "a*""#).unwrap();
+    match cmd {
+        Command::Delete { filter, .. } => assert_eq!(filter.op, CompareOp::Like),
+        _ => panic!("Expected Delete command"),
+    }
+}
+
+#[test]
+fn parse_select_projection_single_column() {
+    let cmd = parse("select id from t").unwrap();
+    match cmd {
+        Command::Select { columns, .. } => assert_eq!(columns.unwrap(), vec!["id"]),
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_projection_four_columns() {
+    let cmd = parse("select a,b,c,d from t").unwrap();
+    match cmd {
+        Command::Select { columns, .. } => {
+            assert_eq!(columns.unwrap(), vec!["a", "b", "c", "d"]);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_star_with_uppercase_where() {
+    let cmd = parse("select * from t WHERE id = 1").unwrap();
+    match cmd {
+        Command::Select { filter, .. } => assert!(filter.is_some()),
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_unknown_op_reports_operator() {
+    let err = parse("select * from t where a approx 1").unwrap_err();
+    assert!(err.to_lowercase().contains("unknown where operator"));
+}
+
+#[test]
+fn parse_delete_not_equal_reports_not_supported() {
+    let err = parse("delete from t where a != 1").unwrap_err();
+    assert!(err.to_lowercase().contains("not supported"));
+}
+
+#[test]
+fn parse_update_not_equal_reports_not_supported() {
+    let err = parse("update t set a = 1 where b != 2").unwrap_err();
+    assert!(err.to_lowercase().contains("not supported"));
+}
+
+#[test]
+fn parse_create_bool_type() {
+    let cmd = parse("create table t (a bool)").unwrap();
+    match cmd {
+        Command::Create { columns, .. } => assert_eq!(columns.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_bigint_type() {
+    let cmd = parse("create table t (a bigint)").unwrap();
+    match cmd {
+        Command::Create { columns, .. } => assert_eq!(columns.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_date_type() {
+    let cmd = parse("create table t (a date)").unwrap();
+    match cmd {
+        Command::Create { columns, .. } => assert_eq!(columns.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_timestamp_type() {
+    let cmd = parse("create table t (a timestamp)").unwrap();
+    match cmd {
+        Command::Create { columns, .. } => assert_eq!(columns.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_uuid_type() {
+    let cmd = parse("create table t (a uuid)").unwrap();
+    match cmd {
+        Command::Create { columns, .. } => assert_eq!(columns.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_json_type() {
+    let cmd = parse("create table t (a json)").unwrap();
+    match cmd {
+        Command::Create { columns, .. } => assert_eq!(columns.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_blob_type() {
+    let cmd = parse("create table t (a blob)").unwrap();
+    match cmd {
+        Command::Create { columns, .. } => assert_eq!(columns.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_varchar_spaces_in_paren() {
+    let cmd = parse("create table t (a varchar ( 10 ))").unwrap();
+    match cmd {
+        Command::Create { columns, .. } => assert_eq!(columns.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_decimal_spaces_in_paren() {
+    let cmd = parse("create table t (a decimal ( 8 , 2 ))").unwrap();
+    match cmd {
+        Command::Create { columns, .. } => assert_eq!(columns.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_decimal_missing_scale_errors() {
+    let err = parse("create table t (a decimal(8))").unwrap_err();
+    assert!(err.to_lowercase().contains("decimal"));
+}
+
+#[test]
+fn parse_create_varchar_missing_size_errors() {
+    let err = parse("create table t (a varchar)").unwrap_err();
+    assert!(err.to_lowercase().contains("varchar"));
+}
+
+#[test]
+fn parse_create_table_constraint_unique_single_col() {
+    let cmd = parse("create table t (a int, unique(a))").unwrap();
+    match cmd {
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_table_constraint_primary_single_col() {
+    let cmd = parse("create table t (a int, primary key(a))").unwrap();
+    match cmd {
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_table_constraint_primary_three_cols() {
+    let cmd = parse("create table t (a int, b int, c int, primary key(a,b,c))").unwrap();
+    match cmd {
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_multiple_table_constraints() {
+    let cmd = parse("create table t (a int, b int, c int, unique(a,b), unique(b,c))").unwrap();
+    match cmd {
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 2),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_begin_with_leading_trailing_spaces() {
+    assert!(matches!(parse("   begin   ").unwrap(), Command::Begin));
+}
+
+#[test]
+fn parse_commit_with_leading_trailing_spaces() {
+    assert!(matches!(parse("   commit   ").unwrap(), Command::Commit));
+}
+
+#[test]
+fn parse_rollback_with_leading_trailing_spaces() {
+    assert!(matches!(parse("   rollback   ").unwrap(), Command::Rollback));
+}
+
+#[test]
+fn parse_update_requires_where_keyword_strictly() {
+    let err = parse("update t set a = 1 when id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: update"));
+}
+
+#[test]
+fn parse_select_rejects_missing_projection() {
+    let err = parse("select from t").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: select"));
+}
+
+#[test]
+fn parse_select_rejects_only_comma_projection() {
+    let err = parse("select , from t").unwrap_err();
+    assert!(err.to_lowercase().contains("column list"));
+}
+
+#[test]
+fn parse_select_rejects_projection_ending_comma_longer() {
+    let err = parse("select a,b, from t").unwrap_err();
+    assert!(err.to_lowercase().contains("column list"));
+}
+
+#[test]
+fn parse_insert_allows_negative_numbers() {
+    let cmd = parse("insert into t values (-1, -2)").unwrap();
+    match cmd {
+        Command::Insert { values, .. } => assert_eq!(values, vec!["-1", "-2"]),
+        _ => panic!("Expected Insert command"),
+    }
+}
+
+#[test]
+fn parse_insert_allows_timestamp_token() {
+    let cmd = parse(r#"insert into t values ("2025-01-01 10:00:00")"#).unwrap();
+    match cmd {
+        Command::Insert { values, .. } => assert_eq!(values, vec!["2025-01-01 10:00:00"]),
+        _ => panic!("Expected Insert command"),
+    }
+}
+
+#[test]
+fn parse_update_assignment_value_can_be_quoted_spaces() {
+    let cmd = parse(r#"update t set name = "hello world" where id = 1"#).unwrap();
+    match cmd {
+        Command::Update { assignments, .. } => assert_eq!(assignments[0].value, "hello world"),
+        _ => panic!("Expected Update command"),
+    }
+}
+
+#[test]
+fn parse_select_where_value_can_be_quoted_spaces() {
+    let cmd = parse(r#"select * from t where name = "hello world""#).unwrap();
+    match cmd {
+        Command::Select { filter, .. } => assert_eq!(filter.expect("where").value, "hello world"),
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_delete_where_value_can_be_quoted_spaces() {
+    let cmd = parse(r#"delete from t where name = "hello world""#).unwrap();
+    match cmd {
+        Command::Delete { filter, .. } => assert_eq!(filter.value, "hello world"),
+        _ => panic!("Expected Delete command"),
+    }
+}
+
+#[test]
+fn parse_create_rejects_unknown_table_constraint_token() {
+    let err = parse("create table t (a int, foreign key(a))").unwrap_err();
+    assert!(err.to_lowercase().contains("unknown"));
+}

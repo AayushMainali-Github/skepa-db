@@ -546,3 +546,34 @@ fn out_of_range_row_pointer_in_index_snapshot_self_heals() {
     let healed = std::fs::read_to_string(path.join("indexes").join("users.indexes.json")).unwrap();
     assert!(healed.contains(r#""row_idx": 0"#));
 }
+
+#[test]
+fn index_directory_exists_after_db_open() {
+    let path = temp_dir("index_dir_exists");
+    let _db = Database::open(path.clone());
+    assert!(path.join("indexes").exists());
+}
+
+#[test]
+fn index_file_created_on_create_table() {
+    let path = temp_dir("index_file_create_table");
+    let mut db = Database::open(path.clone());
+    db.execute("create table users (id int primary key)").unwrap();
+    assert!(path.join("indexes").join("users.indexes.json").exists());
+}
+
+#[test]
+fn empty_index_file_triggers_rebuild_fallback() {
+    let path = temp_dir("index_empty_fallback");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int primary key, email text unique)")
+            .unwrap();
+        db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
+    }
+    std::fs::write(path.join("indexes").join("users.indexes.json"), "").unwrap();
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(db.execute("select * from users where id = 1").unwrap(), "id\temail\n1\ta@x.com");
+    }
+}
