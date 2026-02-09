@@ -75,6 +75,24 @@ fn handle_insert(
     }
 
     let rows = storage.scan(&table)?;
+
+    if !schema.primary_key.is_empty()
+        && storage
+            .lookup_pk_conflict(&table, schema, &row, None)?
+            .is_some()
+    {
+        return Err(format!(
+            "PRIMARY KEY constraint violation on column(s) {}",
+            schema.primary_key.join(",")
+        ));
+    }
+    if let Some(cols) = storage.lookup_unique_conflict(&table, schema, &row, None)? {
+        return Err(format!(
+            "UNIQUE constraint violation on column(s) {}",
+            cols.join(",")
+        ));
+    }
+
     validate_unique_constraints(schema, rows, &row, None)?;
 
     storage.insert_row(&table, row)?;
@@ -104,6 +122,17 @@ fn handle_select(
                 }
             } else {
                 Vec::new()
+            }
+        } else if where_clause.op == CompareOp::Eq {
+            if let Some(row_idx) =
+                storage.lookup_unique_row_index(&table, schema, &where_clause.column, &where_clause.value)?
+            {
+                match rows.get(row_idx) {
+                    Some(r) => vec![r.clone()],
+                    None => Vec::new(),
+                }
+            } else {
+                filter_rows(schema, rows, &where_clause)?
             }
         } else {
             filter_rows(schema, rows, &where_clause)?
@@ -151,6 +180,8 @@ fn handle_update(
         && schema.primary_key.first().is_some_and(|pk| pk == &filter.column)
     {
         storage.lookup_pk_row_index(&table, schema, &filter.value)?
+    } else if filter.op == CompareOp::Eq {
+        storage.lookup_unique_row_index(&table, schema, &filter.column, &filter.value)?
     } else {
         None
     };
@@ -218,6 +249,8 @@ fn handle_delete(
         && schema.primary_key.first().is_some_and(|pk| pk == &filter.column)
     {
         storage.lookup_pk_row_index(&table, schema, &filter.value)?
+    } else if filter.op == CompareOp::Eq {
+        storage.lookup_unique_row_index(&table, schema, &filter.column, &filter.value)?
     } else {
         None
     };

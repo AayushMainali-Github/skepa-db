@@ -17,11 +17,19 @@ pub struct DiskStorage {
     root: PathBuf,
     tables: HashMap<String, Vec<Row>>,
     pk_indexes: HashMap<String, PrimaryIndex>,
+    unique_indexes: HashMap<String, Vec<UniqueIndex>>,
 }
 
 #[derive(Debug, Clone)]
 struct PrimaryIndex {
-    col_idx: usize,
+    col_idxs: Vec<usize>,
+    map: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone)]
+struct UniqueIndex {
+    cols: Vec<String>,
+    col_idxs: Vec<usize>,
     map: BTreeMap<String, usize>,
 }
 
@@ -33,6 +41,7 @@ impl DiskStorage {
             root,
             tables: HashMap::new(),
             pk_indexes: HashMap::new(),
+            unique_indexes: HashMap::new(),
         })
     }
 
@@ -79,7 +88,7 @@ impl DiskStorage {
         }
 
         self.tables.insert(table.to_string(), rows);
-        self.rebuild_primary_index(table, schema)?;
+        self.rebuild_indexes_internal(table, schema)?;
         Ok(())
     }
 
@@ -149,6 +158,7 @@ impl StorageEngine for DiskStorage {
             .map_err(|e| format!("Failed to create table file for '{table}': {e}"))?;
         self.tables.insert(table.to_string(), Vec::new());
         self.pk_indexes.remove(table);
+        self.unique_indexes.remove(table);
         Ok(())
     }
 
@@ -192,45 +202,223 @@ impl StorageEngine for DiskStorage {
             .ok_or_else(|| format!("Unknown column '{}' in primary key", pk_col))?;
         let dtype = &schema.columns[col_idx].dtype;
         let rhs = parse_value(dtype, rhs_token)?;
-        let key = value_to_string(&rhs);
+        let key = encode_key_parts(&[value_to_string(&rhs)]);
         Ok(self
             .pk_indexes
             .get(table)
-            .and_then(|idx| if idx.col_idx == col_idx { idx.map.get(&key).copied() } else { None }))
+            .and_then(|idx| if idx.col_idxs.as_slice() == [col_idx] { idx.map.get(&key).copied() } else { None }))
     }
 
     fn rebuild_indexes(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
-        self.rebuild_primary_index(table, schema)
+        self.rebuild_indexes_internal(table, schema)
+    }
+
+    fn lookup_pk_conflict(
+        &self,
+        table: &str,
+        schema: &Schema,
+        candidate: &Row,
+        skip_idx: Option<usize>,
+    ) -> Result<Option<usize>, String> {
+        if schema.primary_key.is_empty() {
+            return Ok(None);
+        }
+        let idx = match self.pk_indexes.get(table) {
+            Some(i) => i,
+            None => return Ok(None),
+        };
+        let parts = idx
+            .col_idxs
+            .iter()
+            .map(|i| {
+                candidate
+                    .get(*i)
+                    .map(value_to_string)
+                    .ok_or_else(|| "Candidate row missing PK column".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let key = encode_key_parts(&parts);
+        let hit = idx.map.get(&key).copied();
+        Ok(match (hit, skip_idx) {
+            (Some(found), Some(skip)) if found == skip => None,
+            (other, _) => other,
+        })
+    }
+
+    fn lookup_unique_row_index(
+        &self,
+        table: &str,
+        schema: &Schema,
+        column: &str,
+        rhs_token: &str,
+    ) -> Result<Option<usize>, String> {
+        let indexes = match self.unique_indexes.get(table) {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+        let Some(col_idx) = schema.columns.iter().position(|c| c.name == column) else {
+            return Ok(None);
+        };
+        let idx = indexes
+            .iter()
+            .find(|u| u.col_idxs.len() == 1 && u.col_idxs[0] == col_idx);
+        let Some(idx) = idx else {
+            return Ok(None);
+        };
+        let dtype = &schema.columns[col_idx].dtype;
+        let rhs = parse_value(dtype, rhs_token)?;
+        let key = encode_key_parts(&[value_to_string(&rhs)]);
+        Ok(idx.map.get(&key).copied())
+    }
+
+    fn lookup_unique_conflict(
+        &self,
+        table: &str,
+        _schema: &Schema,
+        candidate: &Row,
+        skip_idx: Option<usize>,
+    ) -> Result<Option<Vec<String>>, String> {
+        let indexes = match self.unique_indexes.get(table) {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+        for idx in indexes {
+            let parts = idx
+                .col_idxs
+                .iter()
+                .map(|i| {
+                    candidate
+                        .get(*i)
+                        .map(value_to_string)
+                        .ok_or_else(|| "Candidate row missing UNIQUE column".to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let key = encode_key_parts(&parts);
+            if let Some(found) = idx.map.get(&key).copied() {
+                if skip_idx != Some(found) {
+                    return Ok(Some(idx.cols.clone()));
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
 impl DiskStorage {
+    fn rebuild_indexes_internal(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
+        self.rebuild_primary_index(table, schema)?;
+        self.rebuild_unique_indexes(table, schema)
+    }
+
     fn rebuild_primary_index(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
-        if schema.primary_key.len() != 1 {
+        if schema.primary_key.is_empty() {
             self.pk_indexes.remove(table);
             return Ok(());
         }
-        let pk_col = &schema.primary_key[0];
-        let col_idx = schema
-            .columns
-            .iter()
-            .position(|c| c.name == *pk_col)
-            .ok_or_else(|| format!("Unknown column '{}' in primary key", pk_col))?;
+        let mut col_idxs: Vec<usize> = Vec::new();
+        for pk_col in &schema.primary_key {
+            let col_idx = schema
+                .columns
+                .iter()
+                .position(|c| c.name == *pk_col)
+                .ok_or_else(|| format!("Unknown column '{}' in primary key", pk_col))?;
+            col_idxs.push(col_idx);
+        }
         let rows = self
             .tables
             .get(table)
             .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?;
         let mut map: BTreeMap<String, usize> = BTreeMap::new();
         for (row_idx, row) in rows.iter().enumerate() {
-            let v = row
-                .get(col_idx)
-                .ok_or_else(|| format!("Row is missing PK column '{}'", pk_col))?;
-            map.insert(value_to_string(v), row_idx);
+            let mut parts: Vec<String> = Vec::new();
+            for (i, pk_col) in col_idxs.iter().zip(schema.primary_key.iter()) {
+                let v = row
+                    .get(*i)
+                    .ok_or_else(|| format!("Row is missing PK column '{}'", pk_col))?;
+                parts.push(value_to_string(v));
+            }
+            map.insert(encode_key_parts(&parts), row_idx);
         }
         self.pk_indexes
-            .insert(table.to_string(), PrimaryIndex { col_idx, map });
+            .insert(table.to_string(), PrimaryIndex { col_idxs, map });
         Ok(())
     }
+
+    fn rebuild_unique_indexes(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
+        let rows = self
+            .tables
+            .get(table)
+            .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?;
+        let groups = unique_groups(schema)?;
+        if groups.is_empty() {
+            self.unique_indexes.remove(table);
+            return Ok(());
+        }
+        let mut indexes: Vec<UniqueIndex> = Vec::new();
+        for cols in groups {
+            let mut col_idxs = Vec::new();
+            for c in &cols {
+                let i = schema
+                    .columns
+                    .iter()
+                    .position(|x| x.name == *c)
+                    .ok_or_else(|| format!("Unknown UNIQUE column '{}'", c))?;
+                col_idxs.push(i);
+            }
+            let mut map: BTreeMap<String, usize> = BTreeMap::new();
+            for (row_idx, row) in rows.iter().enumerate() {
+                let parts = col_idxs
+                    .iter()
+                    .map(|i| {
+                        row.get(*i)
+                            .map(value_to_string)
+                            .ok_or_else(|| "Row missing UNIQUE column".to_string())
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                map.insert(encode_key_parts(&parts), row_idx);
+            }
+            indexes.push(UniqueIndex { cols, col_idxs, map });
+        }
+        self.unique_indexes.insert(table.to_string(), indexes);
+        Ok(())
+    }
+}
+
+fn encode_key_parts(parts: &[String]) -> String {
+    // Stable ASCII tuple encoding: each part is length-prefixed.
+    let mut out = String::new();
+    for p in parts {
+        out.push_str(&p.len().to_string());
+        out.push(':');
+        out.push_str(p);
+        out.push(';');
+    }
+    out
+}
+
+fn unique_groups(schema: &Schema) -> Result<Vec<Vec<String>>, String> {
+    let mut out: Vec<Vec<String>> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for cols in &schema.unique_constraints {
+        let key = cols.join(",");
+        if seen.insert(key) {
+            out.push(cols.clone());
+        }
+    }
+    for col in &schema.columns {
+        if col.unique && !col.primary_key {
+            if schema.columns.iter().any(|c| c.name == col.name) {
+                let cols = vec![col.name.clone()];
+                let key = cols.join(",");
+                if seen.insert(key) {
+                    out.push(cols);
+                }
+            } else {
+                return Err("Internal schema error while building UNIQUE indexes".to_string());
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn encode_value(v: &Value) -> String {

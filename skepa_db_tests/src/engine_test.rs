@@ -1089,3 +1089,98 @@ fn test_pk_update_reindexes_for_future_pk_lookup() {
     assert_eq!(db.execute("select * from users where id = 1").unwrap(), "id\tname");
 }
 
+#[test]
+fn test_composite_pk_insert_conflict_still_rejected() {
+    let mut db = test_db();
+    db.execute("create table t (a int, b int, v text, primary key(a,b))")
+        .unwrap();
+    db.execute(r#"insert into t values (1, 1, "x")"#).unwrap();
+    let err = db.execute(r#"insert into t values (1, 1, "y")"#).unwrap_err();
+    assert!(err.to_lowercase().contains("primary key"));
+}
+
+#[test]
+fn test_composite_pk_persists_and_rejects_after_reopen() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_composite_pk_reopen_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (a int, b int, primary key(a,b))")
+            .unwrap();
+        db.execute("insert into t values (1, 1)").unwrap();
+    }
+
+    {
+        let mut db = Database::open(path.clone());
+        let err = db.execute("insert into t values (1, 1)").unwrap_err();
+        assert!(err.to_lowercase().contains("primary key"));
+    }
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_unique_eq_select_path_returns_single_row() {
+    let mut db = test_db();
+    db.execute("create table users (id int, email text unique, name text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a@x.com", "a")"#).unwrap();
+    db.execute(r#"insert into users values (2, "b@x.com", "b")"#).unwrap();
+
+    let out = db.execute(r#"select * from users where email = "b@x.com""#).unwrap();
+    assert_eq!(out, "id\temail\tname\n2\tb@x.com\tb");
+}
+
+#[test]
+fn test_unique_eq_update_path_updates_only_target_row() {
+    let mut db = test_db();
+    db.execute("create table users (id int, email text unique, age int)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a@x.com", 10)"#).unwrap();
+    db.execute(r#"insert into users values (2, "b@x.com", 20)"#).unwrap();
+
+    let out = db
+        .execute(r#"update users set age = 99 where email = "b@x.com""#)
+        .unwrap();
+    assert_eq!(out, "updated 1 row(s) in users");
+    assert_eq!(
+        db.execute("select * from users").unwrap(),
+        "id\temail\tage\n1\ta@x.com\t10\n2\tb@x.com\t99"
+    );
+}
+
+#[test]
+fn test_unique_eq_delete_path_deletes_only_target_row() {
+    let mut db = test_db();
+    db.execute("create table users (id int, email text unique)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
+    db.execute(r#"insert into users values (2, "b@x.com")"#).unwrap();
+
+    let out = db
+        .execute(r#"delete from users where email = "a@x.com""#)
+        .unwrap();
+    assert_eq!(out, "deleted 1 row(s) from users");
+    assert_eq!(db.execute("select * from users").unwrap(), "id\temail\n2\tb@x.com");
+}
+
+#[test]
+fn test_unique_update_reindexes_for_future_unique_lookup() {
+    let mut db = test_db();
+    db.execute("create table users (id int, email text unique)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
+
+    db.execute(r#"update users set email = "z@x.com" where id = 1"#).unwrap();
+    assert_eq!(
+        db.execute(r#"select * from users where email = "z@x.com""#).unwrap(),
+        "id\temail\n1\tz@x.com"
+    );
+    assert_eq!(
+        db.execute(r#"select * from users where email = "a@x.com""#).unwrap(),
+        "id\temail"
+    );
+}
+

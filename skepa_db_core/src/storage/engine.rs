@@ -30,4 +30,37 @@ pub trait StorageEngine {
     fn rebuild_indexes(&mut self, _table: &str, _schema: &Schema) -> Result<(), String> {
         Ok(())
     }
+
+    /// Lookup conflicting existing row for the candidate primary-key tuple.
+    fn lookup_pk_conflict(
+        &self,
+        _table: &str,
+        _schema: &Schema,
+        _candidate: &Row,
+        _skip_idx: Option<usize>,
+    ) -> Result<Option<usize>, String> {
+        Ok(None)
+    }
+
+    /// Lookup row index by equality on a single-column UNIQUE constraint.
+    fn lookup_unique_row_index(
+        &self,
+        _table: &str,
+        _schema: &Schema,
+        _column: &str,
+        _rhs_token: &str,
+    ) -> Result<Option<usize>, String> {
+        Ok(None)
+    }
+
+    /// Lookup conflicting existing row for any UNIQUE tuple (single or composite).
+    fn lookup_unique_conflict(
+        &self,
+        _table: &str,
+        _schema: &Schema,
+        _candidate: &Row,
+        _skip_idx: Option<usize>,
+    ) -> Result<Option<Vec<String>>, String> {
+        Ok(None)
+    }
 }
