@@ -78,6 +78,7 @@ fn handle_insert(
     validate_unique_constraints(schema, rows, &row, None)?;
 
     storage.insert_row(&table, row)?;
+    storage.rebuild_indexes(&table, schema)?;
     Ok(format!("inserted 1 row into {}", table))
 }
 
@@ -92,7 +93,21 @@ fn handle_select(
     let rows = storage.scan(&table)?;
 
     let filtered_rows = if let Some(where_clause) = filter {
-        filter_rows(schema, rows, &where_clause)?
+        if where_clause.op == CompareOp::Eq
+            && schema.primary_key.len() == 1
+            && schema.primary_key.first().is_some_and(|pk| pk == &where_clause.column)
+        {
+            if let Some(row_idx) = storage.lookup_pk_row_index(&table, schema, &where_clause.value)? {
+                match rows.get(row_idx) {
+                    Some(r) => vec![r.clone()],
+                    None => Vec::new(),
+                }
+            } else {
+                Vec::new()
+            }
+        } else {
+            filter_rows(schema, rows, &where_clause)?
+        }
     } else {
         rows.to_vec()
     };
@@ -131,28 +146,56 @@ fn handle_update(
         .position(|c| c.name == filter.column)
         .ok_or_else(|| format!("Unknown column '{}' in WHERE", filter.column))?;
     let where_dtype = &schema.columns[where_idx].dtype;
+    let targeted_row_idx = if filter.op == CompareOp::Eq
+        && schema.primary_key.len() == 1
+        && schema.primary_key.first().is_some_and(|pk| pk == &filter.column)
+    {
+        storage.lookup_pk_row_index(&table, schema, &filter.value)?
+    } else {
+        None
+    };
 
-    let rows = storage.scan_mut(&table)?;
-    let mut updated = 0usize;
-    let mut new_rows = rows.clone();
+    let updated = {
+        let rows = storage.scan_mut(&table)?;
+        let mut updated = 0usize;
+        let mut new_rows = rows.clone();
 
-    for row in new_rows.iter_mut() {
-        let cell = row
-            .get(where_idx)
-            .ok_or_else(|| format!("Row is missing value for column '{}'", filter.column))?;
-
-        if matches_where(cell, where_dtype, &filter.op, &filter.value)? {
-            for (idx, new_value) in &compiled {
-                if let Some(slot) = row.get_mut(*idx) {
-                    *slot = new_value.clone();
+        if let Some(i) = targeted_row_idx {
+            if let Some(row) = new_rows.get_mut(i) {
+                let cell = row
+                    .get(where_idx)
+                    .ok_or_else(|| format!("Row is missing value for column '{}'", filter.column))?;
+                if matches_where(cell, where_dtype, &filter.op, &filter.value)? {
+                    for (idx, new_value) in &compiled {
+                        if let Some(slot) = row.get_mut(*idx) {
+                            *slot = new_value.clone();
+                        }
+                    }
+                    updated += 1;
                 }
             }
-            updated += 1;
-        }
-    }
+        } else {
+            for row in new_rows.iter_mut() {
+                let cell = row
+                    .get(where_idx)
+                    .ok_or_else(|| format!("Row is missing value for column '{}'", filter.column))?;
 
-    validate_all_unique_constraints(schema, &new_rows)?;
-    *rows = new_rows;
+                if matches_where(cell, where_dtype, &filter.op, &filter.value)? {
+                    for (idx, new_value) in &compiled {
+                        if let Some(slot) = row.get_mut(*idx) {
+                            *slot = new_value.clone();
+                        }
+                    }
+                    updated += 1;
+                }
+            }
+        }
+
+        validate_all_unique_constraints(schema, &new_rows)?;
+        *rows = new_rows;
+        updated
+    };
+    storage.rebuild_indexes(&table, schema)?;
 
     Ok(format!("updated {} row(s) in {}", updated, table))
 }
@@ -170,25 +213,55 @@ fn handle_delete(
         .position(|c| c.name == filter.column)
         .ok_or_else(|| format!("Unknown column '{}' in WHERE", filter.column))?;
     let where_dtype = &schema.columns[where_idx].dtype;
+    let targeted_row_idx = if filter.op == CompareOp::Eq
+        && schema.primary_key.len() == 1
+        && schema.primary_key.first().is_some_and(|pk| pk == &filter.column)
+    {
+        storage.lookup_pk_row_index(&table, schema, &filter.value)?
+    } else {
+        None
+    };
 
-    let rows = storage.scan_mut(&table)?;
+    let deleted = {
+        let rows = storage.scan_mut(&table)?;
 
-    let mut keep_flags: Vec<bool> = Vec::with_capacity(rows.len());
-    for row in rows.iter() {
-        let should_delete = row_matches(row, where_idx, &filter.column, where_dtype, &filter.op, &filter.value)?;
-        keep_flags.push(!should_delete);
-    }
-
-    let mut deleted = 0usize;
-    let mut kept: Vec<Row> = Vec::with_capacity(rows.len());
-    for (row, keep) in rows.drain(..).zip(keep_flags) {
-        if keep {
-            kept.push(row);
+        let mut deleted = 0usize;
+        if let Some(i) = targeted_row_idx {
+            if i < rows.len() {
+                let should_delete = row_matches(
+                    &rows[i],
+                    where_idx,
+                    &filter.column,
+                    where_dtype,
+                    &filter.op,
+                    &filter.value,
+                )?;
+                if should_delete {
+                    rows.remove(i);
+                    deleted = 1;
+                }
+            }
         } else {
-            deleted += 1;
+            let mut keep_flags: Vec<bool> = Vec::with_capacity(rows.len());
+            for row in rows.iter() {
+                let should_delete =
+                    row_matches(row, where_idx, &filter.column, where_dtype, &filter.op, &filter.value)?;
+                keep_flags.push(!should_delete);
+            }
+
+            let mut kept: Vec<Row> = Vec::with_capacity(rows.len());
+            for (row, keep) in rows.drain(..).zip(keep_flags) {
+                if keep {
+                    kept.push(row);
+                } else {
+                    deleted += 1;
+                }
+            }
+            *rows = kept;
         }
-    }
-    *rows = kept;
+        deleted
+    };
+    storage.rebuild_indexes(&table, schema)?;
 
     Ok(format!("deleted {} row(s) from {}", deleted, table))
 }

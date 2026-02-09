@@ -1,11 +1,12 @@
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 
 use crate::storage::engine::StorageEngine;
 use crate::storage::Schema;
 use crate::types::datatype::DataType;
-use crate::types::value::{parse_value, Value};
+use crate::types::value::{parse_value, value_to_string, Value};
 use crate::types::Row;
 
 /// Disk-backed storage scaffold.
@@ -15,6 +16,13 @@ use crate::types::Row;
 pub struct DiskStorage {
     root: PathBuf,
     tables: HashMap<String, Vec<Row>>,
+    pk_indexes: HashMap<String, PrimaryIndex>,
+}
+
+#[derive(Debug, Clone)]
+struct PrimaryIndex {
+    col_idx: usize,
+    map: BTreeMap<String, usize>,
 }
 
 impl DiskStorage {
@@ -24,6 +32,7 @@ impl DiskStorage {
         Ok(Self {
             root,
             tables: HashMap::new(),
+            pk_indexes: HashMap::new(),
         })
     }
 
@@ -70,6 +79,7 @@ impl DiskStorage {
         }
 
         self.tables.insert(table.to_string(), rows);
+        self.rebuild_primary_index(table, schema)?;
         Ok(())
     }
 
@@ -138,6 +148,7 @@ impl StorageEngine for DiskStorage {
             .open(table_file)
             .map_err(|e| format!("Failed to create table file for '{table}': {e}"))?;
         self.tables.insert(table.to_string(), Vec::new());
+        self.pk_indexes.remove(table);
         Ok(())
     }
 
@@ -162,6 +173,63 @@ impl StorageEngine for DiskStorage {
         self.tables
             .get_mut(table)
             .ok_or_else(|| format!("Table '{}' does not exist in storage", table))
+    }
+
+    fn lookup_pk_row_index(
+        &self,
+        table: &str,
+        schema: &Schema,
+        rhs_token: &str,
+    ) -> Result<Option<usize>, String> {
+        if schema.primary_key.len() != 1 {
+            return Ok(None);
+        }
+        let pk_col = &schema.primary_key[0];
+        let col_idx = schema
+            .columns
+            .iter()
+            .position(|c| c.name == *pk_col)
+            .ok_or_else(|| format!("Unknown column '{}' in primary key", pk_col))?;
+        let dtype = &schema.columns[col_idx].dtype;
+        let rhs = parse_value(dtype, rhs_token)?;
+        let key = value_to_string(&rhs);
+        Ok(self
+            .pk_indexes
+            .get(table)
+            .and_then(|idx| if idx.col_idx == col_idx { idx.map.get(&key).copied() } else { None }))
+    }
+
+    fn rebuild_indexes(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
+        self.rebuild_primary_index(table, schema)
+    }
+}
+
+impl DiskStorage {
+    fn rebuild_primary_index(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
+        if schema.primary_key.len() != 1 {
+            self.pk_indexes.remove(table);
+            return Ok(());
+        }
+        let pk_col = &schema.primary_key[0];
+        let col_idx = schema
+            .columns
+            .iter()
+            .position(|c| c.name == *pk_col)
+            .ok_or_else(|| format!("Unknown column '{}' in primary key", pk_col))?;
+        let rows = self
+            .tables
+            .get(table)
+            .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?;
+        let mut map: BTreeMap<String, usize> = BTreeMap::new();
+        for (row_idx, row) in rows.iter().enumerate() {
+            let v = row
+                .get(col_idx)
+                .ok_or_else(|| format!("Row is missing PK column '{}'", pk_col))?;
+            map.insert(value_to_string(v), row_idx);
+        }
+        self.pk_indexes
+            .insert(table.to_string(), PrimaryIndex { col_idx, map });
+        Ok(())
     }
 }
 
