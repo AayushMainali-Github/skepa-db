@@ -52,7 +52,7 @@ struct IndexSnapshot {
     entries: Vec<IndexEntry>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct IndexEntry {
     key: String,
     row_idx: usize,
@@ -119,6 +119,7 @@ impl DiskStorage {
         self.tables.insert(table.to_string(), rows);
         if self.load_indexes_from_disk(table, schema).is_err() {
             self.rebuild_indexes_internal(table, schema)?;
+            self.persist_indexes(table)?;
         }
         Ok(())
     }
@@ -403,14 +404,16 @@ impl DiskStorage {
             .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?
             .len();
 
+        let mut should_heal = false;
+
         if let (Some(idx), Some(snap)) = (self.pk_indexes.get_mut(table), snapshot.pk) {
             if idx.col_idxs == snap.col_idxs {
-                idx.map = snap
-                    .entries
-                    .into_iter()
-                    .filter(|e| e.row_idx < row_len)
-                    .map(|e| (e.key, e.row_idx))
-                    .collect();
+                match validate_snapshot_entries(snap.entries, row_len) {
+                    Ok(map) => idx.map = map,
+                    Err(_) => should_heal = true,
+                }
+            } else {
+                should_heal = true;
             }
         }
 
@@ -421,14 +424,17 @@ impl DiskStorage {
                     .iter()
                     .find(|s| s.col_idxs == u.col_idxs && s.cols == u.cols)
                 {
-                    u.map = su
-                        .entries
-                        .iter()
-                        .filter(|e| e.row_idx < row_len)
-                        .map(|e| (e.key.clone(), e.row_idx))
-                        .collect();
+                    match validate_snapshot_entries(su.entries.clone(), row_len) {
+                        Ok(map) => u.map = map,
+                        Err(_) => should_heal = true,
+                    }
+                } else {
+                    should_heal = true;
                 }
             }
+        }
+        if should_heal {
+            self.persist_indexes(table)?;
         }
         Ok(())
     }
@@ -544,6 +550,22 @@ fn unique_groups(schema: &Schema) -> Result<Vec<Vec<String>>, String> {
             } else {
                 return Err("Internal schema error while building UNIQUE indexes".to_string());
             }
+        }
+    }
+    Ok(out)
+}
+
+fn validate_snapshot_entries(
+    entries: Vec<IndexEntry>,
+    row_len: usize,
+) -> Result<BTreeMap<String, usize>, String> {
+    let mut out = BTreeMap::new();
+    for e in entries {
+        if e.row_idx >= row_len {
+            return Err("Index entry row pointer out of range".to_string());
+        }
+        if out.insert(e.key, e.row_idx).is_some() {
+            return Err("Duplicate key in index snapshot".to_string());
         }
     }
     Ok(out)

@@ -469,3 +469,80 @@ fn corrupt_index_file_falls_back_to_rebuild_on_open() {
         );
     }
 }
+
+#[test]
+fn duplicate_key_in_index_snapshot_self_heals() {
+    let path = temp_dir("index_dup_key_heal");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int primary key, email text unique)")
+            .unwrap();
+        db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
+        db.execute(r#"insert into users values (2, "b@x.com")"#).unwrap();
+    }
+
+    // Duplicate key for PK index snapshot.
+    std::fs::write(
+        path.join("indexes").join("users.indexes.json"),
+        r#"{
+  "pk": {
+    "cols": [],
+    "col_idxs": [0],
+    "entries": [
+      { "key": "1:1;", "row_idx": 0 },
+      { "key": "1:1;", "row_idx": 1 }
+    ]
+  },
+  "unique": []
+}"#,
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(
+            db.execute("select * from users where id = 2").unwrap(),
+            "id\temail\n2\tb@x.com"
+        );
+    }
+
+    let healed = std::fs::read_to_string(path.join("indexes").join("users.indexes.json")).unwrap();
+    assert!(!healed.contains(r#""key": "1:1;""#) || healed.matches(r#""key": "1:1;""#).count() == 1);
+}
+
+#[test]
+fn out_of_range_row_pointer_in_index_snapshot_self_heals() {
+    let path = temp_dir("index_row_ptr_heal");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int primary key, email text unique)")
+            .unwrap();
+        db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
+    }
+
+    std::fs::write(
+        path.join("indexes").join("users.indexes.json"),
+        r#"{
+  "pk": {
+    "cols": [],
+    "col_idxs": [0],
+    "entries": [
+      { "key": "1:1;", "row_idx": 99 }
+    ]
+  },
+  "unique": []
+}"#,
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(
+            db.execute("select * from users where id = 1").unwrap(),
+            "id\temail\n1\ta@x.com"
+        );
+    }
+
+    let healed = std::fs::read_to_string(path.join("indexes").join("users.indexes.json")).unwrap();
+    assert!(healed.contains(r#""row_idx": 0"#));
+}
