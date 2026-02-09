@@ -636,3 +636,147 @@ fn row_ids_survive_reopen_and_append_monotonic() {
         .collect::<Vec<_>>();
     assert_eq!(ids, vec![1, 2, 3]);
 }
+
+#[test]
+fn pk_index_snapshot_uses_row_id_field() {
+    let path = temp_dir("pk_index_row_id_field");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (id int primary key, v text)").unwrap();
+        db.execute(r#"insert into t values (1, "a")"#).unwrap();
+        db.execute(r#"insert into t values (2, "b")"#).unwrap();
+    }
+    let content = std::fs::read_to_string(path.join("indexes").join("t.indexes.json")).unwrap();
+    assert!(content.contains("\"row_id\""));
+    assert!(!content.contains("\"row_idx\""));
+}
+
+#[test]
+fn unique_index_snapshot_uses_row_id_field() {
+    let path = temp_dir("uq_index_row_id_field");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (id int, email text unique)").unwrap();
+        db.execute(r#"insert into t values (1, "a@x.com")"#).unwrap();
+    }
+    let content = std::fs::read_to_string(path.join("indexes").join("t.indexes.json")).unwrap();
+    assert!(content.contains("\"row_id\""));
+    assert!(!content.contains("\"row_idx\""));
+}
+
+#[test]
+fn pk_lookup_still_works_after_middle_delete_and_reopen() {
+    let path = temp_dir("pk_lookup_after_delete_reopen");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (id int primary key, v text)").unwrap();
+        db.execute(r#"insert into t values (1, "a")"#).unwrap();
+        db.execute(r#"insert into t values (2, "b")"#).unwrap();
+        db.execute(r#"insert into t values (3, "c")"#).unwrap();
+        db.execute("delete from t where id = 2").unwrap();
+    }
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(db.execute("select * from t where id = 3").unwrap(), "id\tv\n3\tc");
+    }
+}
+
+#[test]
+fn unique_lookup_still_works_after_middle_delete_and_reopen() {
+    let path = temp_dir("uq_lookup_after_delete_reopen");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (id int, email text unique)").unwrap();
+        db.execute(r#"insert into t values (1, "a@x.com")"#).unwrap();
+        db.execute(r#"insert into t values (2, "b@x.com")"#).unwrap();
+        db.execute(r#"insert into t values (3, "c@x.com")"#).unwrap();
+        db.execute(r#"delete from t where email = "b@x.com""#).unwrap();
+    }
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(
+            db.execute(r#"select * from t where email = "c@x.com""#).unwrap(),
+            "id\temail\n3\tc@x.com"
+        );
+    }
+}
+
+#[test]
+fn pk_index_self_heal_when_snapshot_references_unknown_row_id() {
+    let path = temp_dir("pk_unknown_row_id_heal");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (id int primary key)").unwrap();
+        db.execute("insert into t values (1)").unwrap();
+    }
+    std::fs::write(
+        path.join("indexes").join("t.indexes.json"),
+        r#"{
+  "pk": { "cols": [], "col_idxs": [0], "entries": [ { "key": "1:1;", "row_id": 999 } ] },
+  "unique": []
+}"#,
+    )
+    .unwrap();
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(db.execute("select * from t where id = 1").unwrap(), "id\n1");
+    }
+}
+
+#[test]
+fn unique_index_self_heal_when_snapshot_references_unknown_row_id() {
+    let path = temp_dir("uq_unknown_row_id_heal");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (id int, email text unique)").unwrap();
+        db.execute(r#"insert into t values (1, "a@x.com")"#).unwrap();
+    }
+    std::fs::write(
+        path.join("indexes").join("t.indexes.json"),
+        r#"{
+  "pk": null,
+  "unique": [
+    { "cols": ["email"], "col_idxs": [1], "entries": [ { "key": "7:a@x.com;", "row_id": 999 } ] }
+  ]
+}"#,
+    )
+    .unwrap();
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(
+            db.execute(r#"select * from t where email = "a@x.com""#).unwrap(),
+            "id\temail\n1\ta@x.com"
+        );
+    }
+}
+
+#[test]
+fn row_id_format_backward_compat_without_prefix() {
+    let root = temp_dir("row_id_backward_compat");
+    std::fs::create_dir_all(root.join("tables")).unwrap();
+    std::fs::write(root.join("tables").join("users.rows"), "i:1\tt:a\ni:2\tt:b\n").unwrap();
+    let mut db = Database::open(root.clone());
+    db.execute("create table users2 (id int, name text)").unwrap();
+    // Existing table bootstrap path still works and rewrites with row-id prefixes on persist.
+    let mut storage = DiskStorage::new(root.clone()).unwrap();
+    let schema = Schema::new(vec![
+        Column {
+            name: "id".to_string(),
+            dtype: DataType::Int,
+            primary_key: false,
+            unique: false,
+            not_null: false,
+        },
+        Column {
+            name: "name".to_string(),
+            dtype: DataType::Text,
+            primary_key: false,
+            unique: false,
+            not_null: false,
+        },
+    ]);
+    storage.bootstrap_table("users", &schema).unwrap();
+    storage.persist_table("users").unwrap();
+    let rows = std::fs::read_to_string(root.join("tables").join("users.rows")).unwrap();
+    assert!(rows.lines().all(|l| l.starts_with('@')));
+}
