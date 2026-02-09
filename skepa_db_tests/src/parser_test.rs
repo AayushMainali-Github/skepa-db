@@ -639,3 +639,46 @@ fn parse_begin_commit_rollback_usage_errors() {
     assert!(parse("commit now").unwrap_err().to_lowercase().contains("usage: commit"));
     assert!(parse("rollback now").unwrap_err().to_lowercase().contains("usage: rollback"));
 }
+
+#[test]
+fn parse_table_constraint_missing_parentheses_errors() {
+    let err = parse("create table t (a int, b int, primary key a,b)").unwrap_err();
+    assert!(err.to_lowercase().contains("column list"));
+}
+
+#[test]
+fn parse_table_constraint_empty_column_list_errors() {
+    let err = parse("create table t (a int, unique())").unwrap_err();
+    assert!(err.to_lowercase().contains("cannot be empty"));
+}
+
+#[test]
+fn parse_table_constraint_double_comma_errors() {
+    let err = parse("create table t (a int, b int, unique(a,,b))").unwrap_err();
+    assert!(err.to_lowercase().contains("bad constraint column list"));
+}
+
+#[test]
+fn parse_primary_key_constraint_missing_key_keyword_errors() {
+    let err = parse("create table t (a int, primary(a))").unwrap_err();
+    let e = err.to_lowercase();
+    assert!(
+        e.contains("bad create")
+            || e.contains("unknown")
+            || e.contains("column list")
+            || e.contains("constraint")
+    );
+}
+
+#[test]
+fn parse_like_operator_on_select_is_case_insensitive_keyword() {
+    let cmd = parse(r#"select * from users where name LIKE "a*""#).unwrap();
+    match cmd {
+        Command::Select { filter, .. } => {
+            let f = filter.expect("expected where clause");
+            assert_eq!(f.op, CompareOp::Like);
+            assert_eq!(f.value, "a*");
+        }
+        _ => panic!("Expected Select command"),
+    }
+}

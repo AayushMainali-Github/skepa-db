@@ -949,3 +949,143 @@ fn test_transaction_rollback_not_persisted_after_reopen() {
     let _ = std::fs::remove_dir_all(&path);
 }
 
+#[test]
+fn test_transaction_commit_with_multiple_operations() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key, name text, age int)")
+        .unwrap();
+    db.execute("begin").unwrap();
+    db.execute(r#"insert into users values (1, "a", 10)"#).unwrap();
+    db.execute(r#"insert into users values (2, "b", 20)"#).unwrap();
+    db.execute(r#"update users set age = 21 where id = 2"#).unwrap();
+    db.execute(r#"delete from users where name = "a""#).unwrap();
+    db.execute("commit").unwrap();
+    assert_eq!(db.execute("select * from users").unwrap(), "id\tname\tage\n2\tb\t21");
+}
+
+#[test]
+fn test_transaction_rollback_reverts_update_and_delete() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text, age int)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a", 10)"#).unwrap();
+    db.execute(r#"insert into users values (2, "b", 20)"#).unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("update users set age = 99 where id = 1").unwrap();
+    db.execute(r#"delete from users where name = "b""#).unwrap();
+    db.execute("rollback").unwrap();
+
+    assert_eq!(
+        db.execute("select * from users").unwrap(),
+        "id\tname\tage\n1\ta\t10\n2\tb\t20"
+    );
+}
+
+#[test]
+fn test_transaction_rollback_restores_after_constraint_error() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key, email text unique)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
+    db.execute(r#"insert into users values (2, "b@x.com")"#).unwrap();
+
+    db.execute("begin").unwrap();
+    let err = db
+        .execute(r#"update users set email = "a@x.com" where id = 2"#)
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("unique"));
+    db.execute("rollback").unwrap();
+
+    assert_eq!(
+        db.execute("select * from users").unwrap(),
+        "id\temail\n1\ta@x.com\n2\tb@x.com"
+    );
+}
+
+#[test]
+fn test_transaction_commit_without_mutations_is_allowed() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text)").unwrap();
+    db.execute("begin").unwrap();
+    let out = db.execute("commit").unwrap();
+    assert_eq!(out, "transaction committed");
+    assert_eq!(db.execute("select * from users").unwrap(), "id\tname");
+}
+
+#[test]
+fn test_select_still_works_while_transaction_active() {
+    let mut db = test_db();
+    db.execute("create table t (id int, name text)").unwrap();
+    db.execute(r#"insert into t values (1, "a")"#).unwrap();
+    db.execute("begin").unwrap();
+    db.execute(r#"insert into t values (2, "b")"#).unwrap();
+    assert_eq!(db.execute("select name from t where id = 1").unwrap(), "name\na");
+    db.execute("rollback").unwrap();
+}
+
+#[test]
+fn test_composite_primary_key_violation_on_update() {
+    let mut db = test_db();
+    db.execute("create table t (a int, b int, primary key(a,b))")
+        .unwrap();
+    db.execute("insert into t values (1, 1)").unwrap();
+    db.execute("insert into t values (1, 2)").unwrap();
+    let err = db.execute("update t set b = 1 where b = 2").unwrap_err();
+    assert!(err.to_lowercase().contains("primary key"));
+}
+
+#[test]
+fn test_pk_eq_select_path_returns_single_row() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key, name text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a")"#).unwrap();
+    db.execute(r#"insert into users values (2, "b")"#).unwrap();
+    db.execute(r#"insert into users values (3, "c")"#).unwrap();
+
+    let out = db.execute("select * from users where id = 2").unwrap();
+    assert_eq!(out, "id\tname\n2\tb");
+}
+
+#[test]
+fn test_pk_eq_update_path_updates_only_target_row() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key, name text, age int)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a", 10)"#).unwrap();
+    db.execute(r#"insert into users values (2, "b", 20)"#).unwrap();
+
+    let out = db.execute(r#"update users set age = 99 where id = 2"#).unwrap();
+    assert_eq!(out, "updated 1 row(s) in users");
+    assert_eq!(
+        db.execute("select * from users").unwrap(),
+        "id\tname\tage\n1\ta\t10\n2\tb\t99"
+    );
+}
+
+#[test]
+fn test_pk_eq_delete_path_deletes_only_target_row() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key, name text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a")"#).unwrap();
+    db.execute(r#"insert into users values (2, "b")"#).unwrap();
+
+    let out = db.execute("delete from users where id = 1").unwrap();
+    assert_eq!(out, "deleted 1 row(s) from users");
+    assert_eq!(db.execute("select * from users").unwrap(), "id\tname\n2\tb");
+}
+
+#[test]
+fn test_pk_update_reindexes_for_future_pk_lookup() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key, name text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a")"#).unwrap();
+
+    db.execute("update users set id = 10 where id = 1").unwrap();
+    assert_eq!(db.execute("select * from users where id = 10").unwrap(), "id\tname\n10\ta");
+    assert_eq!(db.execute("select * from users where id = 1").unwrap(), "id\tname");
+}
+
