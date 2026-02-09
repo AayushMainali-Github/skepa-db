@@ -186,10 +186,11 @@ fn handle_update(
         None
     };
 
-    let updated = {
-        let rows = storage.scan_mut(&table)?;
+    let (updated, new_rows, old_indices) = {
+        let rows = storage.scan(&table)?;
         let mut updated = 0usize;
-        let mut new_rows = rows.clone();
+        let mut new_rows = rows.to_vec();
+        let old_indices: Vec<usize> = (0..rows.len()).collect();
 
         if let Some(i) = targeted_row_idx {
             if let Some(row) = new_rows.get_mut(i) {
@@ -223,9 +224,9 @@ fn handle_update(
         }
 
         validate_all_unique_constraints(schema, &new_rows)?;
-        *rows = new_rows;
-        updated
+        (updated, new_rows, old_indices)
     };
+    storage.replace_rows_with_alignment(&table, new_rows, old_indices)?;
     storage.rebuild_indexes(&table, schema)?;
 
     Ok(format!("updated {} row(s) in {}", updated, table))
@@ -255,10 +256,12 @@ fn handle_delete(
         None
     };
 
-    let deleted = {
-        let rows = storage.scan_mut(&table)?;
+    let (deleted, kept_rows, kept_old_indices) = {
+        let rows = storage.scan(&table)?;
 
         let mut deleted = 0usize;
+        let mut kept_rows: Vec<Row> = Vec::new();
+        let mut kept_old_indices: Vec<usize> = Vec::new();
         if let Some(i) = targeted_row_idx {
             if i < rows.len() {
                 let should_delete = row_matches(
@@ -270,8 +273,18 @@ fn handle_delete(
                     &filter.value,
                 )?;
                 if should_delete {
-                    rows.remove(i);
                     deleted = 1;
+                    for (idx, row) in rows.iter().enumerate() {
+                        if idx != i {
+                            kept_rows.push(row.clone());
+                            kept_old_indices.push(idx);
+                        }
+                    }
+                } else {
+                    for (idx, row) in rows.iter().enumerate() {
+                        kept_rows.push(row.clone());
+                        kept_old_indices.push(idx);
+                    }
                 }
             }
         } else {
@@ -282,18 +295,18 @@ fn handle_delete(
                 keep_flags.push(!should_delete);
             }
 
-            let mut kept: Vec<Row> = Vec::with_capacity(rows.len());
-            for (row, keep) in rows.drain(..).zip(keep_flags) {
+            for (idx, (row, keep)) in rows.iter().cloned().zip(keep_flags).enumerate() {
                 if keep {
-                    kept.push(row);
+                    kept_rows.push(row);
+                    kept_old_indices.push(idx);
                 } else {
                     deleted += 1;
                 }
             }
-            *rows = kept;
         }
-        deleted
+        (deleted, kept_rows, kept_old_indices)
     };
+    storage.replace_rows_with_alignment(&table, kept_rows, kept_old_indices)?;
     storage.rebuild_indexes(&table, schema)?;
 
     Ok(format!("deleted {} row(s) from {}", deleted, table))

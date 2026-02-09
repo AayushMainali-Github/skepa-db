@@ -17,6 +17,8 @@ use crate::types::Row;
 pub struct DiskStorage {
     root: PathBuf,
     tables: HashMap<String, Vec<Row>>,
+    row_ids: HashMap<String, Vec<u64>>,
+    next_row_id: HashMap<String, u64>,
     pk_indexes: HashMap<String, PrimaryIndex>,
     unique_indexes: HashMap<String, Vec<UniqueIndex>>,
 }
@@ -65,6 +67,8 @@ impl DiskStorage {
         Ok(Self {
             root,
             tables: HashMap::new(),
+            row_ids: HashMap::new(),
+            next_row_id: HashMap::new(),
             pk_indexes: HashMap::new(),
             unique_indexes: HashMap::new(),
         })
@@ -91,12 +95,21 @@ impl DiskStorage {
         let content = fs::read_to_string(&table_file)
             .map_err(|e| format!("Failed to read table file for '{table}': {e}"))?;
         let mut rows: Vec<Row> = Vec::new();
+        let mut row_ids: Vec<u64> = Vec::new();
+        let mut max_row_id = 0u64;
 
         for (line_no, line) in content.lines().enumerate() {
             if line.trim().is_empty() {
                 continue;
             }
-            let tokens: Vec<&str> = line.split('\t').collect();
+            let mut tokens: Vec<&str> = line.split('\t').collect();
+            let parsed_row_id = parse_row_id_prefix(tokens.first().copied().unwrap_or(""));
+            let row_id = if let Some(id) = parsed_row_id {
+                tokens.remove(0);
+                id
+            } else {
+                (line_no as u64) + 1
+            };
             if tokens.len() != schema.columns.len() {
                 return Err(format!(
                     "Malformed row in table '{}' at line {}: expected {} values, got {}",
@@ -114,9 +127,15 @@ impl DiskStorage {
                 row.push(parse_value(dtype, &decoded)?);
             }
             rows.push(row);
+            row_ids.push(row_id);
+            if row_id > max_row_id {
+                max_row_id = row_id;
+            }
         }
 
         self.tables.insert(table.to_string(), rows);
+        self.row_ids.insert(table.to_string(), row_ids);
+        self.next_row_id.insert(table.to_string(), max_row_id + 1);
         if self.load_indexes_from_disk(table, schema).is_err() {
             self.rebuild_indexes_internal(table, schema)?;
             self.persist_indexes(table)?;
@@ -138,15 +157,22 @@ impl DiskStorage {
             .tables
             .get(table)
             .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?;
+        let row_ids = self
+            .row_ids
+            .get(table)
+            .ok_or_else(|| format!("Table '{}' row ids are missing", table))?;
+        if rows.len() != row_ids.len() {
+            return Err(format!("Table '{}' row-id alignment is corrupted", table));
+        }
         let table_file = self.table_file_path(table);
         let mut lines: Vec<String> = Vec::with_capacity(rows.len());
-        for row in rows {
+        for (i, row) in rows.iter().enumerate() {
             let encoded = row
                 .iter()
                 .map(encode_value)
                 .collect::<Vec<_>>()
                 .join("\t");
-            lines.push(encoded);
+            lines.push(format!("@{}|\t{}", row_ids[i], encoded));
         }
         let payload = if lines.is_empty() {
             String::new()
@@ -198,6 +224,8 @@ impl StorageEngine for DiskStorage {
             .open(self.index_file_path(table))
             .map_err(|e| format!("Failed to create index file for '{table}': {e}"))?;
         self.tables.insert(table.to_string(), Vec::new());
+        self.row_ids.insert(table.to_string(), Vec::new());
+        self.next_row_id.insert(table.to_string(), 1);
         self.pk_indexes.remove(table);
         self.unique_indexes.remove(table);
         Ok(())
@@ -208,7 +236,17 @@ impl StorageEngine for DiskStorage {
             .tables
             .get_mut(table)
             .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?;
+        let ids = self
+            .row_ids
+            .get_mut(table)
+            .ok_or_else(|| format!("Table '{}' row ids are missing", table))?;
+        let next = self
+            .next_row_id
+            .get_mut(table)
+            .ok_or_else(|| format!("Table '{}' next row id is missing", table))?;
         rows.push(row);
+        ids.push(*next);
+        *next += 1;
         Ok(())
     }
 
@@ -224,6 +262,33 @@ impl StorageEngine for DiskStorage {
         self.tables
             .get_mut(table)
             .ok_or_else(|| format!("Table '{}' does not exist in storage", table))
+    }
+
+    fn replace_rows_with_alignment(
+        &mut self,
+        table: &str,
+        new_rows: Vec<Row>,
+        old_indices: Vec<usize>,
+    ) -> Result<(), String> {
+        if new_rows.len() != old_indices.len() {
+            return Err("Row replacement alignment mismatch".to_string());
+        }
+        let old_ids = self
+            .row_ids
+            .get(table)
+            .cloned()
+            .ok_or_else(|| format!("Table '{}' row ids are missing", table))?;
+        let mut new_ids: Vec<u64> = Vec::with_capacity(new_rows.len());
+        for old_i in old_indices {
+            let id = old_ids
+                .get(old_i)
+                .copied()
+                .ok_or_else(|| "Row replacement old index out of range".to_string())?;
+            new_ids.push(id);
+        }
+        self.tables.insert(table.to_string(), new_rows);
+        self.row_ids.insert(table.to_string(), new_ids);
+        Ok(())
     }
 
     fn lookup_pk_row_index(
@@ -553,6 +618,13 @@ fn unique_groups(schema: &Schema) -> Result<Vec<Vec<String>>, String> {
         }
     }
     Ok(out)
+}
+
+fn parse_row_id_prefix(token: &str) -> Option<u64> {
+    if !token.starts_with('@') || !token.ends_with('|') {
+        return None;
+    }
+    token[1..token.len() - 1].parse::<u64>().ok()
 }
 
 fn validate_snapshot_entries(

@@ -16,6 +16,17 @@ pub trait StorageEngine {
     /// Mutable access to all rows for in-place updates
     fn scan_mut(&mut self, table: &str) -> Result<&mut Vec<Row>, String>;
 
+    /// Replace all rows while preserving stable internal row-ids using old index alignment.
+    /// `old_indices[new_i]` is the source old row index for `new_rows[new_i]`.
+    fn replace_rows_with_alignment(
+        &mut self,
+        _table: &str,
+        _new_rows: Vec<Row>,
+        _old_indices: Vec<usize>,
+    ) -> Result<(), String> {
+        Err("replace_rows_with_alignment not implemented".to_string())
+    }
+
     /// Lookup row index by single-column primary key equality.
     fn lookup_pk_row_index(
         &self,

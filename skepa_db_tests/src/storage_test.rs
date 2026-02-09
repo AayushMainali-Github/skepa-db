@@ -577,3 +577,62 @@ fn empty_index_file_triggers_rebuild_fallback() {
         assert_eq!(db.execute("select * from users where id = 1").unwrap(), "id\temail\n1\ta@x.com");
     }
 }
+
+#[test]
+fn row_ids_are_persisted_with_row_prefix() {
+    let path = temp_dir("row_id_prefix_persist");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int, name text)").unwrap();
+        db.execute(r#"insert into users values (1, "a")"#).unwrap();
+        db.execute(r#"insert into users values (2, "b")"#).unwrap();
+    }
+    let rows = std::fs::read_to_string(path.join("tables").join("users.rows")).unwrap();
+    assert!(rows.lines().all(|l| l.starts_with('@') && l.contains("|\t")));
+}
+
+#[test]
+fn row_ids_remain_stable_for_survivors_after_delete() {
+    let path = temp_dir("row_id_stable_after_delete");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int primary key, name text)").unwrap();
+        db.execute(r#"insert into users values (1, "a")"#).unwrap();
+        db.execute(r#"insert into users values (2, "b")"#).unwrap();
+        db.execute(r#"insert into users values (3, "c")"#).unwrap();
+        db.execute("delete from users where id = 2").unwrap();
+    }
+    let rows = std::fs::read_to_string(path.join("tables").join("users.rows")).unwrap();
+    let ids = rows
+        .lines()
+        .map(|l| {
+            let end = l.find('|').unwrap();
+            l[1..end].parse::<u64>().unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![1, 3]);
+}
+
+#[test]
+fn row_ids_survive_reopen_and_append_monotonic() {
+    let path = temp_dir("row_id_reopen_monotonic");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int, name text)").unwrap();
+        db.execute(r#"insert into users values (1, "a")"#).unwrap();
+        db.execute(r#"insert into users values (2, "b")"#).unwrap();
+    }
+    {
+        let mut db = Database::open(path.clone());
+        db.execute(r#"insert into users values (3, "c")"#).unwrap();
+    }
+    let rows = std::fs::read_to_string(path.join("tables").join("users.rows")).unwrap();
+    let ids = rows
+        .lines()
+        .map(|l| {
+            let end = l.find('|').unwrap();
+            l[1..end].parse::<u64>().unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![1, 2, 3]);
+}
