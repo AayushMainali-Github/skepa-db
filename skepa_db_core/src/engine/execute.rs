@@ -1,5 +1,5 @@
 use crate::engine::format::format_select;
-use crate::parser::command::{Assignment, ColumnDef, Command, CompareOp, TableConstraintDef, WhereClause};
+use crate::parser::command::{Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, TableConstraintDef, WhereClause};
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, Value};
@@ -262,12 +262,13 @@ fn handle_delete(
         None
     };
 
-    let (deleted, kept_rows, kept_old_indices) = {
+    let (deleted, kept_rows, kept_old_indices, deleted_rows) = {
         let rows = storage.scan(&table)?;
 
         let mut deleted = 0usize;
         let mut kept_rows: Vec<Row> = Vec::new();
         let mut kept_old_indices: Vec<usize> = Vec::new();
+        let mut deleted_rows: Vec<Row> = Vec::new();
         if let Some(i) = targeted_row_idx {
             if i < rows.len() {
                 let should_delete = row_matches(
@@ -285,6 +286,8 @@ fn handle_delete(
                         if idx != i {
                             kept_rows.push(row.clone());
                             kept_old_indices.push(idx);
+                        } else {
+                            deleted_rows.push(row.clone());
                         }
                     }
                 } else {
@@ -309,12 +312,14 @@ fn handle_delete(
                 } else {
                     validate_restrict_on_parent_delete(catalog, storage, &table, schema, &rows[idx])?;
                     deleted += 1;
+                    deleted_rows.push(rows[idx].clone());
                 }
             }
         }
-        (deleted, kept_rows, kept_old_indices)
+        (deleted, kept_rows, kept_old_indices, deleted_rows)
     };
     storage.replace_rows_with_alignment(&table, kept_rows, kept_old_indices)?;
+    apply_on_delete_cascade(catalog, storage, &table, schema, &deleted_rows)?;
     storage.rebuild_indexes(&table, schema)?;
 
     Ok(format!("deleted {} row(s) from {}", deleted, table))
@@ -621,6 +626,9 @@ fn validate_restrict_on_parent_delete(
     parent_row: &Row,
 ) -> Result<(), String> {
     for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
+        if fk.on_delete != ForeignKeyAction::Restrict {
+            continue;
+        }
         let child_schema = catalog.schema(&child_table)?;
         let child_rows = storage.scan(&child_table)?;
         let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
@@ -679,6 +687,42 @@ fn incoming_foreign_keys(catalog: &Catalog, parent_table: &str) -> Vec<(String, 
         }
     }
     out
+}
+
+fn apply_on_delete_cascade(
+    catalog: &Catalog,
+    storage: &mut dyn StorageEngine,
+    parent_table: &str,
+    parent_schema: &Schema,
+    deleted_parent_rows: &[Row],
+) -> Result<(), String> {
+    if deleted_parent_rows.is_empty() {
+        return Ok(());
+    }
+    for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
+        if fk.on_delete != ForeignKeyAction::Cascade {
+            continue;
+        }
+        let child_schema = catalog.schema(&child_table)?;
+        let child_rows = storage.scan(&child_table)?;
+        let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
+        let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
+
+        let mut keep_rows: Vec<Row> = Vec::new();
+        let mut keep_old_indices: Vec<usize> = Vec::new();
+        for (idx, cr) in child_rows.iter().enumerate() {
+            let referenced = deleted_parent_rows
+                .iter()
+                .any(|pr| tuple_eq(cr, &child_idxs, pr, &parent_idxs));
+            if !referenced {
+                keep_rows.push(cr.clone());
+                keep_old_indices.push(idx);
+            }
+        }
+        storage.replace_rows_with_alignment(&child_table, keep_rows, keep_old_indices)?;
+        storage.rebuild_indexes(&child_table, child_schema)?;
+    }
+    Ok(())
 }
 
 fn resolve_cols_to_idxs(schema: &Schema, cols: &[String]) -> Result<Vec<usize>, String> {

@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::parser::command::{ColumnDef, TableConstraintDef};
+use crate::parser::command::{ColumnDef, ForeignKeyAction, TableConstraintDef};
 use crate::types::datatype::DataType;
 use crate::storage::schema::{Schema, Column, ForeignKeyDef};
 
@@ -46,6 +46,12 @@ struct ForeignKeyFile {
     columns: Vec<String>,
     ref_table: String,
     ref_columns: Vec<String>,
+    #[serde(default = "default_on_delete")]
+    on_delete: String,
+}
+
+fn default_on_delete() -> String {
+    "restrict".to_string()
 }
 
 impl Catalog {
@@ -116,11 +122,13 @@ impl Catalog {
                     columns,
                     ref_table,
                     ref_columns,
+                    on_delete,
                 } => {
                     foreign_keys.push(ForeignKeyDef {
                         columns,
                         ref_table,
                         ref_columns,
+                        on_delete,
                     });
                 }
             }
@@ -265,6 +273,10 @@ impl Catalog {
                             columns: fk.columns.clone(),
                             ref_table: fk.ref_table.clone(),
                             ref_columns: fk.ref_columns.clone(),
+                            on_delete: match fk.on_delete {
+                                ForeignKeyAction::Restrict => "restrict".to_string(),
+                                ForeignKeyAction::Cascade => "cascade".to_string(),
+                            },
                         })
                         .collect(),
                 },
@@ -319,6 +331,10 @@ impl Catalog {
                             columns: fk.columns,
                             ref_table: fk.ref_table,
                             ref_columns: fk.ref_columns,
+                            on_delete: match fk.on_delete.to_lowercase().as_str() {
+                                "cascade" => ForeignKeyAction::Cascade,
+                                _ => ForeignKeyAction::Restrict,
+                            },
                         })
                         .collect(),
                 ),

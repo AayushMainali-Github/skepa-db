@@ -1,10 +1,12 @@
 use crate::types::datatype::DataType;
+use crate::parser::command::ForeignKeyAction;
 
 #[derive(Debug, Clone)]
 pub struct ForeignKeyDef {
     pub columns: Vec<String>,
     pub ref_table: String,
     pub ref_columns: Vec<String>,
+    pub on_delete: ForeignKeyAction,
 }
 
 /// Represents a single column in a table schema

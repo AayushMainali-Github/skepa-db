@@ -1003,6 +1003,104 @@ fn parse_foreign_key_missing_references_errors() {
 }
 
 #[test]
+fn parse_foreign_key_on_delete_cascade() {
+    let cmd = parse(
+        "create table c (a int, foreign key(a) references p(id) on delete cascade)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_foreign_key_on_delete_restrict() {
+    let cmd = parse(
+        "create table c (a int, foreign key(a) references p(id) on delete restrict)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_foreign_key_unknown_on_delete_action_errors() {
+    let err = parse("create table c (a int, foreign key(a) references p(id) on delete setnull)")
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("unknown on delete action"));
+}
+
+#[test]
+fn parse_foreign_key_missing_parent_table_errors() {
+    let err = parse("create table c (a int, foreign key(a) references)").unwrap_err();
+    assert!(err.to_lowercase().contains("parent table"));
+}
+
+#[test]
+fn parse_foreign_key_missing_parent_columns_errors() {
+    let err = parse("create table c (a int, foreign key(a) references p)").unwrap_err();
+    assert!(err.to_lowercase().contains("column list"));
+}
+
+#[test]
+fn parse_foreign_key_on_delete_case_insensitive() {
+    let cmd = parse(
+        "create table c (a int, foreign key(a) references p(id) ON DELETE CASCADE)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_foreign_key_can_follow_other_constraints() {
+    let cmd = parse(
+        "create table c (id int primary key, p int, unique(p), foreign key(p) references parent(id))",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create {
+            columns,
+            table_constraints,
+            ..
+        } => {
+            assert_eq!(columns.len(), 2);
+            assert_eq!(table_constraints.len(), 2);
+        }
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_two_foreign_keys_in_one_table() {
+    let cmd = parse(
+        "create table c (a int, b int, foreign key(a) references p1(id), foreign key(b) references p2(id))",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 2),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_foreign_key_composite_with_spaces() {
+    let cmd = parse(
+        "create table c (a int, b int, foreign key ( a , b ) references p ( x , y ) on delete cascade)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
 fn parse_create_table_constraint_primary_single_col() {
     let cmd = parse("create table t (a int, primary key(a))").unwrap();
     match cmd {

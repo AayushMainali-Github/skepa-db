@@ -1,5 +1,5 @@
 use crate::parser::command::{
-    Assignment, ColumnDef, Command, CompareOp, TableConstraintDef, WhereClause,
+    Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, TableConstraintDef, WhereClause,
 };
 use crate::types::datatype::{DataType, parse_datatype};
 
@@ -549,12 +549,29 @@ fn parse_table_constraint_in_create(
             return Err("Bad FOREIGN KEY constraint. Missing parent table".to_string());
         }
         let ref_table = tokens[after_cols + 1].clone();
-        let (ref_cols, next) = parse_column_name_list(tokens, after_cols + 2, end)?;
+        let (ref_cols, mut next) = parse_column_name_list(tokens, after_cols + 2, end)?;
+        let mut on_delete = ForeignKeyAction::Restrict;
+        if next + 2 < end
+            && tokens[next].eq_ignore_ascii_case("on")
+            && tokens[next + 1].eq_ignore_ascii_case("delete")
+        {
+            on_delete = match tokens[next + 2].to_lowercase().as_str() {
+                "restrict" => ForeignKeyAction::Restrict,
+                "cascade" => ForeignKeyAction::Cascade,
+                other => {
+                    return Err(format!(
+                        "Unknown ON DELETE action '{other}'. Use restrict|cascade"
+                    ))
+                }
+            };
+            next += 3;
+        }
         return Ok((
             TableConstraintDef::ForeignKey {
                 columns: cols,
                 ref_table,
                 ref_columns: ref_cols,
+                on_delete,
             },
             next,
         ));

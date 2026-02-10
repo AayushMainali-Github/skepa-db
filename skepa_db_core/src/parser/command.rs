@@ -40,7 +40,14 @@ pub enum TableConstraintDef {
         columns: Vec<String>,
         ref_table: String,
         ref_columns: Vec<String>,
+        on_delete: ForeignKeyAction,
     },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForeignKeyAction {
+    Restrict,
+    Cascade,
 }
 
 #[derive(Debug)]
