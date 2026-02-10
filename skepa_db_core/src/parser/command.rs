@@ -20,11 +20,20 @@ pub enum LogicalOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct WhereClause {
+pub struct Predicate {
     pub column: String,
     pub op: CompareOp,
     pub value: String,
-    pub next: Option<(LogicalOp, Box<WhereClause>)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum WhereClause {
+    Predicate(Predicate),
+    Binary {
+        left: Box<WhereClause>,
+        op: LogicalOp,
+        right: Box<WhereClause>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

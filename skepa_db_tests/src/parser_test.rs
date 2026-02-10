@@ -1,6 +1,13 @@
-use skepa_db_core::parser::command::{Command, CompareOp, JoinType};
+use skepa_db_core::parser::command::{Command, CompareOp, JoinType, WhereClause};
 use skepa_db_core::parser::parser::parse;
 use skepa_db_core::types::datatype::DataType;
+
+fn pred(clause: &WhereClause) -> &skepa_db_core::parser::command::Predicate {
+    match clause {
+        WhereClause::Predicate(p) => p,
+        _ => panic!("expected predicate where-clause"),
+    }
+}
 
 #[test]
 fn parse_create_basic() {
@@ -65,9 +72,10 @@ fn parse_select_where_eq() {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), Vec::<String>::new());
             let f = filter.expect("expected where clause");
-            assert_eq!(f.column, "name");
-            assert_eq!(f.op, CompareOp::Eq);
-            assert_eq!(f.value, "ram");
+            let p = pred(&f);
+            assert_eq!(p.column, "name");
+            assert_eq!(p.op, CompareOp::Eq);
+            assert_eq!(p.value, "ram");
         }
         _ => panic!("Expected Select command"),
     }
@@ -80,9 +88,10 @@ fn parse_select_where_keyword_operator() {
     match cmd {
         Command::Select { filter, .. } => {
             let f = filter.expect("expected where clause");
-            assert_eq!(f.column, "age");
-            assert_eq!(f.op, CompareOp::Gte);
-            assert_eq!(f.value, "18");
+            let p = pred(&f);
+            assert_eq!(p.column, "age");
+            assert_eq!(p.op, CompareOp::Gte);
+            assert_eq!(p.value, "18");
         }
         _ => panic!("Expected Select command"),
     }
@@ -95,9 +104,10 @@ fn parse_select_where_like() {
     match cmd {
         Command::Select { filter, .. } => {
             let f = filter.expect("expected where clause");
-            assert_eq!(f.column, "name");
-            assert_eq!(f.op, CompareOp::Like);
-            assert_eq!(f.value, "ra*");
+            let p = pred(&f);
+            assert_eq!(p.column, "name");
+            assert_eq!(p.op, CompareOp::Like);
+            assert_eq!(p.value, "ra*");
         }
         _ => panic!("Expected Select command"),
     }
@@ -117,9 +127,10 @@ fn parse_update_basic() {
             assert_eq!(assignments.len(), 1);
             assert_eq!(assignments[0].column, "name");
             assert_eq!(assignments[0].value, "ravi");
-            assert_eq!(filter.column, "id");
-            assert_eq!(filter.op, CompareOp::Eq);
-            assert_eq!(filter.value, "1");
+            let p = pred(&filter);
+            assert_eq!(p.column, "id");
+            assert_eq!(p.op, CompareOp::Eq);
+            assert_eq!(p.value, "1");
         }
         _ => panic!("Expected Update command"),
     }
@@ -148,9 +159,10 @@ fn parse_delete_basic() {
     match cmd {
         Command::Delete { table, filter } => {
             assert_eq!(table, "users");
-            assert_eq!(filter.column, "id");
-            assert_eq!(filter.op, CompareOp::Eq);
-            assert_eq!(filter.value, "1");
+            let p = pred(&filter);
+            assert_eq!(p.column, "id");
+            assert_eq!(p.op, CompareOp::Eq);
+            assert_eq!(p.value, "1");
         }
         _ => panic!("Expected Delete command"),
     }
@@ -189,9 +201,10 @@ fn parse_select_projection_with_where() {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), vec!["id".to_string(), "name".to_string()]);
             let f = filter.expect("expected where clause");
-            assert_eq!(f.column, "name");
-            assert_eq!(f.op, CompareOp::Like);
-            assert_eq!(f.value, "ra*");
+            let p = pred(&f);
+            assert_eq!(p.column, "name");
+            assert_eq!(p.op, CompareOp::Like);
+            assert_eq!(p.value, "ra*");
         }
         _ => panic!("Expected Select command"),
     }
@@ -505,8 +518,9 @@ fn update_supports_no_spaces_around_equals() {
         Command::Update { assignments, filter, .. } => {
             assert_eq!(assignments[0].column, "age");
             assert_eq!(assignments[0].value, "20");
-            assert_eq!(filter.column, "id");
-            assert_eq!(filter.value, "1");
+            let pf = pred(&filter);
+            assert_eq!(pf.column, "id");
+            assert_eq!(pf.value, "1");
         }
         _ => panic!("Expected Update command"),
     }
@@ -681,8 +695,9 @@ fn parse_like_operator_on_select_is_case_insensitive_keyword() {
     match cmd {
         Command::Select { filter, .. } => {
             let f = filter.expect("expected where clause");
-            assert_eq!(f.op, CompareOp::Like);
-            assert_eq!(f.value, "a*");
+            let pf = pred(&f);
+            assert_eq!(pf.op, CompareOp::Like);
+            assert_eq!(pf.value, "a*");
         }
         _ => panic!("Expected Select command"),
     }
@@ -695,7 +710,8 @@ macro_rules! parse_select_op_test {
             let cmd = parse(&format!("select * from t where a {} 1", $op)).unwrap();
             match cmd {
                 Command::Select { filter, .. } => {
-                    assert_eq!(filter.expect("where").op, $expected);
+                    let wf = filter.expect("where");
+                    assert_eq!(pred(&wf).op, $expected);
                 }
                 _ => panic!("Expected Select command"),
             }
@@ -811,7 +827,7 @@ fn parse_update_set_two_columns_no_spaces_after_comma() {
 fn parse_update_where_like_operator() {
     let cmd = parse(r#"update t set name = "x" where name like "a*""#).unwrap();
     match cmd {
-        Command::Update { filter, .. } => assert_eq!(filter.op, CompareOp::Like),
+        Command::Update { filter, .. } => assert_eq!(pred(&filter).op, CompareOp::Like),
         _ => panic!("Expected Update command"),
     }
 }
@@ -820,7 +836,7 @@ fn parse_update_where_like_operator() {
 fn parse_delete_where_like_operator() {
     let cmd = parse(r#"delete from t where name like "a*""#).unwrap();
     match cmd {
-        Command::Delete { filter, .. } => assert_eq!(filter.op, CompareOp::Like),
+        Command::Delete { filter, .. } => assert_eq!(pred(&filter).op, CompareOp::Like),
         _ => panic!("Expected Delete command"),
     }
 }
@@ -1287,7 +1303,7 @@ fn parse_update_assignment_value_can_be_quoted_spaces() {
 fn parse_select_where_value_can_be_quoted_spaces() {
     let cmd = parse(r#"select * from t where name = "hello world""#).unwrap();
     match cmd {
-        Command::Select { filter, .. } => assert_eq!(filter.expect("where").value, "hello world"),
+        Command::Select { filter, .. } => { let wf = filter.expect("where"); assert_eq!(pred(&wf).value, "hello world") },
         _ => panic!("Expected Select command"),
     }
 }
@@ -1296,7 +1312,7 @@ fn parse_select_where_value_can_be_quoted_spaces() {
 fn parse_delete_where_value_can_be_quoted_spaces() {
     let cmd = parse(r#"delete from t where name = "hello world""#).unwrap();
     match cmd {
-        Command::Delete { filter, .. } => assert_eq!(filter.value, "hello world"),
+        Command::Delete { filter, .. } => assert_eq!(pred(&filter).value, "hello world"),
         _ => panic!("Expected Delete command"),
     }
 }
@@ -1396,7 +1412,7 @@ fn parse_select_with_order_by_and_limit() {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), vec!["id", "name"]);
             let f = filter.expect("where");
-            assert_eq!(f.column, "age");
+            assert_eq!(pred(&f).column, "age");
             let o = order_by.expect("order by");
             assert_eq!(o.column, "name");
             assert!(!o.asc);
@@ -1433,8 +1449,9 @@ fn parse_select_where_is_null() {
     match cmd {
         Command::Select { filter, .. } => {
             let f = filter.expect("where");
-            assert_eq!(f.column, "city");
-            assert_eq!(f.op, CompareOp::IsNull);
+            let pf = pred(&f);
+            assert_eq!(pf.column, "city");
+            assert_eq!(pf.op, CompareOp::IsNull);
         }
         _ => panic!("Expected Select command"),
     }
@@ -1446,7 +1463,7 @@ fn parse_select_where_is_not_null() {
     match cmd {
         Command::Select { filter, .. } => {
             let f = filter.expect("where");
-            assert_eq!(f.op, CompareOp::IsNotNull);
+            assert_eq!(pred(&f).op, CompareOp::IsNotNull);
         }
         _ => panic!("Expected Select command"),
     }
@@ -1456,7 +1473,7 @@ fn parse_select_where_is_not_null() {
 fn parse_update_where_is_null() {
     let cmd = parse("update users set city = \"x\" where city is null").unwrap();
     match cmd {
-        Command::Update { filter, .. } => assert_eq!(filter.op, CompareOp::IsNull),
+        Command::Update { filter, .. } => assert_eq!(pred(&filter).op, CompareOp::IsNull),
         _ => panic!("Expected Update command"),
     }
 }
@@ -1465,7 +1482,7 @@ fn parse_update_where_is_null() {
 fn parse_delete_where_is_not_null() {
     let cmd = parse("delete from users where city is not null").unwrap();
     match cmd {
-        Command::Delete { filter, .. } => assert_eq!(filter.op, CompareOp::IsNotNull),
+        Command::Delete { filter, .. } => assert_eq!(pred(&filter).op, CompareOp::IsNotNull),
         _ => panic!("Expected Delete command"),
     }
 }
@@ -1476,8 +1493,9 @@ fn parse_select_where_in_list() {
     match cmd {
         Command::Select { filter, .. } => {
             let f = filter.expect("where");
-            assert_eq!(f.column, "id");
-            assert_eq!(f.op, CompareOp::In);
+            let pf = pred(&f);
+            assert_eq!(pf.column, "id");
+            assert_eq!(pf.op, CompareOp::In);
         }
         _ => panic!("Expected Select command"),
     }
@@ -1487,7 +1505,7 @@ fn parse_select_where_in_list() {
 fn parse_update_where_in_list() {
     let cmd = parse("update users set city = \"x\" where id in (1,2)").unwrap();
     match cmd {
-        Command::Update { filter, .. } => assert_eq!(filter.op, CompareOp::In),
+        Command::Update { filter, .. } => assert_eq!(pred(&filter).op, CompareOp::In),
         _ => panic!("Expected Update command"),
     }
 }
@@ -1496,7 +1514,7 @@ fn parse_update_where_in_list() {
 fn parse_delete_where_in_list() {
     let cmd = parse("delete from users where id in (1,2)").unwrap();
     match cmd {
-        Command::Delete { filter, .. } => assert_eq!(filter.op, CompareOp::In),
+        Command::Delete { filter, .. } => assert_eq!(pred(&filter).op, CompareOp::In),
         _ => panic!("Expected Delete command"),
     }
 }
@@ -1514,8 +1532,10 @@ fn parse_select_where_and_chain() {
     match cmd {
         Command::Select { filter, .. } => {
             let f = filter.expect("where");
-            assert_eq!(f.column, "age");
-            assert!(f.next.is_some());
+            match f {
+                WhereClause::Binary { .. } => {}
+                _ => panic!("expected binary where expression"),
+            }
         }
         _ => panic!("Expected Select command"),
     }
@@ -1525,7 +1545,19 @@ fn parse_select_where_and_chain() {
 fn parse_select_where_or_chain() {
     let cmd = parse("select * from users where city = \"ny\" or city = \"la\"").unwrap();
     match cmd {
-        Command::Select { filter, .. } => assert!(filter.expect("where").next.is_some()),
+        Command::Select { filter, .. } => { match filter.expect("where") { WhereClause::Binary { .. } => {}, _ => panic!("expected binary where expression") } },
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_where_parentheses() {
+    let cmd = parse("select * from users where (age gt 18 or city = \"ny\") and city is not null").unwrap();
+    match cmd {
+        Command::Select { filter, .. } => match filter.expect("where") {
+            WhereClause::Binary { .. } => {}
+            _ => panic!("expected binary expression"),
+        },
         _ => panic!("Expected Select command"),
     }
 }
@@ -1714,5 +1746,7 @@ fn parse_select_with_left_join_basic() {
 fn parse_select_left_join_requires_join_keyword() {
     assert!(parse("select * from users left profiles on users.id = profiles.user_id").is_err());
 }
+
+
 
 

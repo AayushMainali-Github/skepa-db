@@ -286,15 +286,15 @@ fn handle_select(
 
     let filtered_rows = if let Some(where_clause) = filter {
         if !is_join
-            && where_clause.next.is_none()
-            && where_clause.op == CompareOp::Eq
+            && simple_eq_filter(&where_clause).is_some()
             && select_schema.primary_key.len() == 1
             && select_schema
                 .primary_key
                 .first()
-                .is_some_and(|pk| pk == &where_clause.column)
+                .is_some_and(|pk| pk == &simple_eq_filter(&where_clause).expect("eq").0)
         {
-            if let Some(row_idx) = storage.lookup_pk_row_index(&table, &select_schema, &where_clause.value)? {
+            let (_col, val) = simple_eq_filter(&where_clause).expect("eq");
+            if let Some(row_idx) = storage.lookup_pk_row_index(&table, &select_schema, &val)? {
                 match base_rows.get(row_idx) {
                     Some(r) => vec![r.clone()],
                     None => Vec::new(),
@@ -302,16 +302,17 @@ fn handle_select(
             } else {
                 Vec::new()
             }
-        } else if !is_join && where_clause.next.is_none() && where_clause.op == CompareOp::Eq {
+        } else if !is_join && simple_eq_filter(&where_clause).is_some() {
+            let (col, val) = simple_eq_filter(&where_clause).expect("eq");
             if let Some(row_idx) =
-                storage.lookup_unique_row_index(&table, &select_schema, &where_clause.column, &where_clause.value)?
+                storage.lookup_unique_row_index(&table, &select_schema, &col, &val)?
             {
                 match base_rows.get(row_idx) {
                     Some(r) => vec![r.clone()],
                     None => Vec::new(),
                 }
             } else if let Some(row_indices) =
-                storage.lookup_secondary_row_indices(&table, &select_schema, &where_clause.column, &where_clause.value)?
+                storage.lookup_secondary_row_indices(&table, &select_schema, &col, &val)?
             {
                 row_indices
                     .into_iter()
@@ -540,19 +541,21 @@ fn handle_update(
         compiled.push((idx, parsed));
     }
 
-    let _ = resolve_column_index(schema, &filter.column, "WHERE")?;
-    let targeted_row_indices = if filter.next.is_none() && filter.op == CompareOp::Eq
+    validate_where_columns(schema, &filter)?;
+    let targeted_row_indices = if simple_eq_filter(&filter).is_some()
         && schema.primary_key.len() == 1
-        && schema.primary_key.first().is_some_and(|pk| pk == &filter.column)
+        && schema.primary_key.first().is_some_and(|pk| pk == &simple_eq_filter(&filter).expect("eq").0)
     {
+        let (_, val) = simple_eq_filter(&filter).expect("eq");
         storage
-            .lookup_pk_row_index(&table, schema, &filter.value)?
+            .lookup_pk_row_index(&table, schema, &val)?
             .map(|i| vec![i])
-    } else if filter.next.is_none() && filter.op == CompareOp::Eq {
-        if let Some(i) = storage.lookup_unique_row_index(&table, schema, &filter.column, &filter.value)? {
+    } else if simple_eq_filter(&filter).is_some() {
+        let (col, val) = simple_eq_filter(&filter).expect("eq");
+        if let Some(i) = storage.lookup_unique_row_index(&table, schema, &col, &val)? {
             Some(vec![i])
         } else {
-            storage.lookup_secondary_row_indices(&table, schema, &filter.column, &filter.value)?
+            storage.lookup_secondary_row_indices(&table, schema, &col, &val)?
         }
     } else {
         None
@@ -613,19 +616,21 @@ fn handle_delete(
     storage: &mut dyn StorageEngine,
 ) -> Result<String, String> {
     let schema = catalog.schema(&table)?;
-    let _ = resolve_column_index(schema, &filter.column, "WHERE")?;
-    let targeted_row_indices = if filter.next.is_none() && filter.op == CompareOp::Eq
+    validate_where_columns(schema, &filter)?;
+    let targeted_row_indices = if simple_eq_filter(&filter).is_some()
         && schema.primary_key.len() == 1
-        && schema.primary_key.first().is_some_and(|pk| pk == &filter.column)
+        && schema.primary_key.first().is_some_and(|pk| pk == &simple_eq_filter(&filter).expect("eq").0)
     {
+        let (_, val) = simple_eq_filter(&filter).expect("eq");
         storage
-            .lookup_pk_row_index(&table, schema, &filter.value)?
+            .lookup_pk_row_index(&table, schema, &val)?
             .map(|i| vec![i])
-    } else if filter.next.is_none() && filter.op == CompareOp::Eq {
-        if let Some(i) = storage.lookup_unique_row_index(&table, schema, &filter.column, &filter.value)? {
+    } else if simple_eq_filter(&filter).is_some() {
+        let (col, val) = simple_eq_filter(&filter).expect("eq");
+        if let Some(i) = storage.lookup_unique_row_index(&table, schema, &col, &val)? {
             Some(vec![i])
         } else {
-            storage.lookup_secondary_row_indices(&table, schema, &filter.column, &filter.value)?
+            storage.lookup_secondary_row_indices(&table, schema, &col, &val)?
         }
     } else {
         None
@@ -734,32 +739,40 @@ fn filter_rows(
 }
 
 fn validate_where_columns(schema: &Schema, clause: &WhereClause) -> Result<(), String> {
-    let _ = resolve_column_index(schema, &clause.column, "WHERE")?;
-    if let Some((_, next)) = &clause.next {
-        validate_where_columns(schema, next)?;
+    match clause {
+        WhereClause::Predicate(p) => {
+            let _ = resolve_column_index(schema, &p.column, "WHERE")?;
+            Ok(())
+        }
+        WhereClause::Binary { left, right, .. } => {
+            validate_where_columns(schema, left)?;
+            validate_where_columns(schema, right)
+        }
     }
-    Ok(())
 }
 
 fn eval_where_row(row: &Row, schema: &Schema, clause: &WhereClause) -> Result<bool, String> {
-    let col_idx = resolve_column_index(schema, &clause.column, "WHERE")?;
-    let col_dtype = &schema.columns[col_idx].dtype;
-    let base = row_matches(
-        row,
-        col_idx,
-        &clause.column,
-        col_dtype,
-        &clause.op,
-        &clause.value,
-    )?;
-    if let Some((logic, next)) = &clause.next {
-        let rhs = eval_where_row(row, schema, next)?;
-        Ok(match logic {
-            LogicalOp::And => base && rhs,
-            LogicalOp::Or => base || rhs,
-        })
-    } else {
-        Ok(base)
+    match clause {
+        WhereClause::Predicate(p) => {
+            let col_idx = resolve_column_index(schema, &p.column, "WHERE")?;
+            let col_dtype = &schema.columns[col_idx].dtype;
+            row_matches(row, col_idx, &p.column, col_dtype, &p.op, &p.value)
+        }
+        WhereClause::Binary { left, op, right } => {
+            let lhs = eval_where_row(row, schema, left)?;
+            let rhs = eval_where_row(row, schema, right)?;
+            Ok(match op {
+                LogicalOp::And => lhs && rhs,
+                LogicalOp::Or => lhs || rhs,
+            })
+        }
+    }
+}
+
+fn simple_eq_filter(clause: &WhereClause) -> Option<(String, String)> {
+    match clause {
+        WhereClause::Predicate(p) if p.op == CompareOp::Eq => Some((p.column.clone(), p.value.clone())),
+        _ => None,
     }
 }
 

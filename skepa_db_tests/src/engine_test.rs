@@ -733,6 +733,37 @@ fn test_delete_where_or() {
 }
 
 #[test]
+fn test_select_where_parentheses_precedence() {
+    let mut db = test_db();
+    db.execute("create table users (id int, age int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, 20, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (2, 20, "la")"#).unwrap();
+    db.execute(r#"insert into users values (3, 16, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (4, 16, "la")"#).unwrap();
+
+    let out = db
+        .execute(r#"select id from users where (age gte 18 and city = "la") or city = "ny" order by id asc"#)
+        .unwrap();
+    assert_eq!(out, "id\n1\n2\n3");
+}
+
+#[test]
+fn test_update_where_parentheses() {
+    let mut db = test_db();
+    db.execute("create table users (id int, age int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, 20, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (2, 16, "la")"#).unwrap();
+    db.execute(r#"insert into users values (3, 16, "ny")"#).unwrap();
+
+    let msg = db
+        .execute(r#"update users set city = "x" where (age gte 18 and city = "ny") or id = 2"#)
+        .unwrap();
+    assert_eq!(msg, "updated 2 row(s) in users");
+    let out = db.execute("select * from users order by id asc").unwrap();
+    assert_eq!(out, "id\tage\tcity\n1\t20\tx\n2\t16\tx\n3\t16\tny");
+}
+
+#[test]
 fn test_update_unknown_set_column_errors() {
     let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
