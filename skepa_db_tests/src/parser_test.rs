@@ -1470,6 +1470,44 @@ fn parse_delete_where_is_not_null() {
     }
 }
 
+#[test]
+fn parse_select_where_in_list() {
+    let cmd = parse("select * from users where id in (1,2,3)").unwrap();
+    match cmd {
+        Command::Select { filter, .. } => {
+            let f = filter.expect("where");
+            assert_eq!(f.column, "id");
+            assert_eq!(f.op, CompareOp::In);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_update_where_in_list() {
+    let cmd = parse("update users set city = \"x\" where id in (1,2)").unwrap();
+    match cmd {
+        Command::Update { filter, .. } => assert_eq!(filter.op, CompareOp::In),
+        _ => panic!("Expected Update command"),
+    }
+}
+
+#[test]
+fn parse_delete_where_in_list() {
+    let cmd = parse("delete from users where id in (1,2)").unwrap();
+    match cmd {
+        Command::Delete { filter, .. } => assert_eq!(filter.op, CompareOp::In),
+        _ => panic!("Expected Delete command"),
+    }
+}
+
+#[test]
+fn parse_select_where_in_invalid_syntax_errors() {
+    assert!(parse("select * from users where id in 1,2").is_err());
+    assert!(parse("select * from users where id in ()").is_err());
+    assert!(parse("select * from users where id in (1,)").is_err());
+}
+
 macro_rules! parse_ok_cases {
     ($( $name:ident => $sql:expr ),* $(,)?) => {
         $(

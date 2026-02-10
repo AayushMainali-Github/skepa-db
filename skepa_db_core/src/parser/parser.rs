@@ -679,8 +679,9 @@ fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
         ">=" | "gte" => Ok(CompareOp::Gte),
         "<=" | "lte" => Ok(CompareOp::Lte),
         "like" => Ok(CompareOp::Like),
+        "in" => Ok(CompareOp::In),
         _ => Err(format!(
-            "Unknown WHERE operator '{raw}'. Use =|eq|>|gt|<|lt|>=|gte|<=|lte|like"
+            "Unknown WHERE operator '{raw}'. Use =|eq|>|gt|<|lt|>=|gte|<=|lte|like|in"
         )),
     }
 }
@@ -704,6 +705,36 @@ fn parse_where_clause(tokens: &[String], usage_msg: &str) -> Result<WhereClause,
             value: String::new(),
         });
     }
+    if tokens.len() >= 5 && tokens[1].eq_ignore_ascii_case("in") {
+        if tokens[2] != "(" || tokens[tokens.len() - 1] != ")" {
+            return Err(usage_msg.to_string());
+        }
+        let mut vals: Vec<String> = Vec::new();
+        let mut i = 3usize;
+        let end = tokens.len() - 1;
+        while i < end {
+            vals.push(tokens[i].clone());
+            i += 1;
+            if i < end {
+                if tokens[i] != "," {
+                    return Err(usage_msg.to_string());
+                }
+                i += 1;
+                if i >= end {
+                    return Err(usage_msg.to_string());
+                }
+            }
+        }
+        if vals.is_empty() {
+            return Err(usage_msg.to_string());
+        }
+        return Ok(WhereClause {
+            column: tokens[0].clone(),
+            op: CompareOp::In,
+            value: vals.join("\u{1F}"),
+        });
+    }
+
     if tokens.len() == 3 {
         let op = parse_compare_op(&tokens[1])?;
         return Ok(WhereClause {

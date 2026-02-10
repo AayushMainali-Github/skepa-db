@@ -8,6 +8,7 @@ pub enum CompareOp {
     Gte,
     Lte,
     Like,
+    In,
     IsNull,
     IsNotNull,
 }

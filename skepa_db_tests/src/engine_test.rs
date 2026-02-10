@@ -622,6 +622,66 @@ fn test_delete_where_is_not_null() {
 }
 
 #[test]
+fn test_select_where_in_numeric_and_text() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (2, "la")"#).unwrap();
+    db.execute(r#"insert into users values (3, "sf")"#).unwrap();
+
+    let out_ids = db
+        .execute("select id from users where id in (1,3) order by id asc")
+        .unwrap();
+    assert_eq!(out_ids, "id\n1\n3");
+
+    let out_city = db
+        .execute(r#"select id from users where city in ("la","sf") order by id asc"#)
+        .unwrap();
+    assert_eq!(out_city, "id\n2\n3");
+}
+
+#[test]
+fn test_update_where_in() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, "a")"#).unwrap();
+    db.execute(r#"insert into users values (2, "b")"#).unwrap();
+    db.execute(r#"insert into users values (3, "c")"#).unwrap();
+
+    let msg = db
+        .execute(r#"update users set city = "x" where id in (1,3)"#)
+        .unwrap();
+    assert_eq!(msg, "updated 2 row(s) in users");
+    let out = db.execute("select * from users order by id asc").unwrap();
+    assert_eq!(out, "id\tcity\n1\tx\n2\tb\n3\tx");
+}
+
+#[test]
+fn test_delete_where_in() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, "a")"#).unwrap();
+    db.execute(r#"insert into users values (2, "b")"#).unwrap();
+    db.execute(r#"insert into users values (3, "c")"#).unwrap();
+
+    let msg = db.execute("delete from users where id in (2,3)").unwrap();
+    assert_eq!(msg, "deleted 2 row(s) from users");
+    let out = db.execute("select * from users").unwrap();
+    assert_eq!(out, "id\tcity\n1\ta");
+}
+
+#[test]
+fn test_where_in_type_mismatch_errors() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, "a")"#).unwrap();
+    let err = db
+        .execute(r#"select * from users where id in ("x","y")"#)
+        .unwrap_err();
+    assert!(err.contains("Expected int"));
+}
+
+#[test]
 fn test_update_unknown_set_column_errors() {
     let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();

@@ -884,6 +884,22 @@ fn matches_where(cell: &Value, dtype: &DataType, op: &CompareOp, rhs_token: &str
     match op {
         CompareOp::IsNull => Ok(matches!(cell, Value::Null)),
         CompareOp::IsNotNull => Ok(!matches!(cell, Value::Null)),
+        CompareOp::In => {
+            let items: Vec<&str> = rhs_token
+                .split('\u{1F}')
+                .filter(|s| !s.is_empty())
+                .collect();
+            if items.is_empty() {
+                return Err("IN list cannot be empty".to_string());
+            }
+            for tok in items {
+                let rhs = parse_value(dtype, tok)?;
+                if cell == &rhs {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
         CompareOp::Eq => {
             let rhs = parse_value(dtype, rhs_token)?;
             Ok(cell == &rhs)
