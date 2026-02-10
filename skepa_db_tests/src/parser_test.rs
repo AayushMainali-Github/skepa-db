@@ -1392,7 +1392,7 @@ fn parse_drop_index_basic() {
 fn parse_select_with_order_by_and_limit() {
     let cmd = parse("select id,name from users where age gte 18 order by name desc limit 5").unwrap();
     match cmd {
-        Command::Select { table, columns, filter, order_by, limit } => {
+        Command::Select { table, columns, filter, order_by, limit, .. } => {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), vec!["id", "name"]);
             let f = filter.expect("where");
@@ -1546,6 +1546,7 @@ fn parse_more_select_struct_fields_are_populated() {
             filter,
             order_by,
             limit,
+            ..
         } => {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), vec!["id"]);
@@ -1555,6 +1556,41 @@ fn parse_more_select_struct_fields_are_populated() {
         }
         _ => panic!("Expected Select"),
     }
+}
+
+#[test]
+fn parse_select_with_inner_join_basic() {
+    let cmd = parse("select users.id,profiles.city from users join profiles on users.id = profiles.user_id").unwrap();
+    match cmd {
+        Command::Select { table, join, columns, .. } => {
+            assert_eq!(table, "users");
+            let j = join.expect("join");
+            assert_eq!(j.table, "profiles");
+            assert_eq!(j.left_column, "users.id");
+            assert_eq!(j.right_column, "profiles.user_id");
+            assert_eq!(columns.unwrap(), vec!["users.id", "profiles.city"]);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_with_inner_join_where_order_limit() {
+    let cmd = parse("select * from users join profiles on users.id = profiles.user_id where profiles.city = \"ny\" order by users.id desc limit 2").unwrap();
+    match cmd {
+        Command::Select { join, filter, order_by, limit, .. } => {
+            assert!(join.is_some());
+            assert!(filter.is_some());
+            assert_eq!(order_by.expect("order").column, "users.id");
+            assert_eq!(limit, Some(2));
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_join_bad_on_syntax_errors() {
+    assert!(parse("select * from users join profiles on users.id profiles.user_id").is_err());
 }
 
 

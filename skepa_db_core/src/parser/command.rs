@@ -30,6 +30,13 @@ pub struct OrderBy {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct JoinClause {
+    pub table: String,
+    pub left_column: String,
+    pub right_column: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ColumnDef {
     pub name: String,
     pub dtype: DataType,
@@ -121,6 +128,7 @@ pub enum Command {
 
     Select {
         table: String,
+        join: Option<JoinClause>,
         columns: Option<Vec<String>>,
         filter: Option<WhereClause>,
         order_by: Option<OrderBy>,

@@ -1,5 +1,6 @@
 use crate::parser::command::{
-    AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, OrderBy, TableConstraintDef, WhereClause,
+    AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, OrderBy, TableConstraintDef,
+    WhereClause,
 };
 use crate::types::datatype::{DataType, parse_datatype};
 
@@ -551,9 +552,24 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     let table = tokens[from_idx + 1].clone();
 
     let mut i = from_idx + 2;
+    let mut join: Option<JoinClause> = None;
     let mut filter: Option<WhereClause> = None;
     let mut order_by: Option<OrderBy> = None;
     let mut limit: Option<usize> = None;
+
+    if i < tokens.len() && tokens[i].eq_ignore_ascii_case("join") {
+        if i + 5 >= tokens.len() || !tokens[i + 2].eq_ignore_ascii_case("on") || tokens[i + 4] != "=" {
+            return Err(
+                "Usage: select <col1,col2|*> from <table> [join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            );
+        }
+        join = Some(JoinClause {
+            table: tokens[i + 1].clone(),
+            left_column: tokens[i + 3].clone(),
+            right_column: tokens[i + 5].clone(),
+        });
+        i += 6;
+    }
 
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("where") {
         if i + 3 >= tokens.len() {
@@ -606,12 +622,13 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
 
     if i != tokens.len() {
         return Err(
-            "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            "Usage: select <col1,col2|*> from <table> [join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
         );
     }
 
     Ok(Command::Select {
         table,
+        join,
         columns: Some(columns),
         filter,
         order_by,

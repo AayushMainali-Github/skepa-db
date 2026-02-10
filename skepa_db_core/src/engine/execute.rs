@@ -1,5 +1,5 @@
 use crate::engine::format::format_select;
-use crate::parser::command::{AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, OrderBy, TableConstraintDef, WhereClause};
+use crate::parser::command::{AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, OrderBy, TableConstraintDef, WhereClause};
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, Value};
@@ -33,11 +33,12 @@ pub fn execute_command(
         Command::Delete { table, filter } => handle_delete(table, filter, catalog, storage),
         Command::Select {
             table,
+            join,
             columns,
             filter,
             order_by,
             limit,
-        } => handle_select(table, columns, filter, order_by, limit, catalog, storage),
+        } => handle_select(table, join, columns, filter, order_by, limit, catalog, storage),
         Command::Begin | Command::Commit | Command::Rollback => {
             Err("Transaction control is handled by Database".to_string())
         }
@@ -266,6 +267,7 @@ fn handle_insert(
 
 fn handle_select(
     table: String,
+    join: Option<JoinClause>,
     columns: Option<Vec<String>>,
     filter: Option<WhereClause>,
     order_by: Option<OrderBy>,
@@ -273,54 +275,60 @@ fn handle_select(
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
 ) -> Result<String, String> {
-    let schema = catalog.schema(&table)?;
-    let rows = storage.scan(&table)?;
+    let is_join = join.is_some();
+    let (select_schema, base_rows): (Schema, Vec<Row>) = if let Some(join_clause) = join {
+        build_join_rows(catalog, storage, &table, &join_clause)?
+    } else {
+        let schema = catalog.schema(&table)?;
+        let rows = storage.scan(&table)?;
+        (schema.clone(), rows.to_vec())
+    };
 
     let filtered_rows = if let Some(where_clause) = filter {
-        if where_clause.op == CompareOp::Eq
-            && schema.primary_key.len() == 1
-            && schema.primary_key.first().is_some_and(|pk| pk == &where_clause.column)
+        if !is_join
+            && where_clause.op == CompareOp::Eq
+            && select_schema.primary_key.len() == 1
+            && select_schema
+                .primary_key
+                .first()
+                .is_some_and(|pk| pk == &where_clause.column)
         {
-            if let Some(row_idx) = storage.lookup_pk_row_index(&table, schema, &where_clause.value)? {
-                match rows.get(row_idx) {
+            if let Some(row_idx) = storage.lookup_pk_row_index(&table, &select_schema, &where_clause.value)? {
+                match base_rows.get(row_idx) {
                     Some(r) => vec![r.clone()],
                     None => Vec::new(),
                 }
             } else {
                 Vec::new()
             }
-        } else if where_clause.op == CompareOp::Eq {
+        } else if !is_join && where_clause.op == CompareOp::Eq {
             if let Some(row_idx) =
-                storage.lookup_unique_row_index(&table, schema, &where_clause.column, &where_clause.value)?
+                storage.lookup_unique_row_index(&table, &select_schema, &where_clause.column, &where_clause.value)?
             {
-                match rows.get(row_idx) {
+                match base_rows.get(row_idx) {
                     Some(r) => vec![r.clone()],
                     None => Vec::new(),
                 }
             } else if let Some(row_indices) =
-                storage.lookup_secondary_row_indices(&table, schema, &where_clause.column, &where_clause.value)?
+                storage.lookup_secondary_row_indices(&table, &select_schema, &where_clause.column, &where_clause.value)?
             {
                 row_indices
                     .into_iter()
-                    .filter_map(|i| rows.get(i).cloned())
+                    .filter_map(|i| base_rows.get(i).cloned())
                     .collect()
             } else {
-                filter_rows(schema, rows, &where_clause)?
+                filter_rows(&select_schema, &base_rows, &where_clause)?
             }
         } else {
-            filter_rows(schema, rows, &where_clause)?
+            filter_rows(&select_schema, &base_rows, &where_clause)?
         }
     } else {
-        rows.to_vec()
+        base_rows.to_vec()
     };
 
     let mut ordered_rows = filtered_rows;
     if let Some(ob) = order_by {
-        let idx = schema
-            .columns
-            .iter()
-            .position(|c| c.name == ob.column)
-            .ok_or_else(|| format!("Unknown column '{}' in ORDER BY", ob.column))?;
+        let idx = resolve_column_index(&select_schema, &ob.column, "ORDER BY")?;
         ordered_rows.sort_by(|a, b| compare_for_order(a.get(idx), b.get(idx), ob.asc));
     }
     let limited_rows = if let Some(n) = limit {
@@ -329,8 +337,140 @@ fn handle_select(
         ordered_rows
     };
 
-    let (out_schema, out_rows) = project_rows(schema, &limited_rows, columns.as_ref())?;
+    let (out_schema, out_rows) = project_rows(&select_schema, &limited_rows, columns.as_ref())?;
     Ok(format_select(&out_schema, &out_rows))
+}
+
+fn build_join_rows(
+    catalog: &Catalog,
+    storage: &dyn StorageEngine,
+    left_table: &str,
+    join: &JoinClause,
+) -> Result<(Schema, Vec<Row>), String> {
+    let left_schema = catalog.schema(left_table)?;
+    let right_schema = catalog.schema(&join.table)?;
+    let left_rows = storage.scan(left_table)?;
+    let right_rows = storage.scan(&join.table)?;
+
+    let (left_side, left_idx) =
+        resolve_join_operand(left_table, left_schema, &join.table, right_schema, &join.left_column)?;
+    let (right_side, right_idx) =
+        resolve_join_operand(left_table, left_schema, &join.table, right_schema, &join.right_column)?;
+
+    if left_side == right_side {
+        return Err("JOIN ON clause must compare one column from each table".to_string());
+    }
+
+    let (lidx, ridx) = if left_side {
+        (left_idx, right_idx)
+    } else {
+        (right_idx, left_idx)
+    };
+
+    if left_schema.columns[lidx].dtype != right_schema.columns[ridx].dtype {
+        return Err("JOIN columns must have the same datatype".to_string());
+    }
+
+    let mut out_columns: Vec<Column> = Vec::new();
+    for c in &left_schema.columns {
+        out_columns.push(Column {
+            name: format!("{}.{}", left_table, c.name),
+            dtype: c.dtype.clone(),
+            primary_key: false,
+            unique: false,
+            not_null: c.not_null,
+        });
+    }
+    for c in &right_schema.columns {
+        out_columns.push(Column {
+            name: format!("{}.{}", join.table, c.name),
+            dtype: c.dtype.clone(),
+            primary_key: false,
+            unique: false,
+            not_null: c.not_null,
+        });
+    }
+
+    let mut out_rows: Vec<Row> = Vec::new();
+    for lr in left_rows {
+        for rr in right_rows {
+            if matches!(lr.get(lidx), Some(Value::Null)) || matches!(rr.get(ridx), Some(Value::Null)) {
+                continue;
+            }
+            if lr.get(lidx) == rr.get(ridx) {
+                let mut row = lr.clone();
+                row.extend(rr.clone());
+                out_rows.push(row);
+            }
+        }
+    }
+
+    Ok((Schema::new(out_columns), out_rows))
+}
+
+fn resolve_join_operand(
+    left_table: &str,
+    left_schema: &Schema,
+    right_table: &str,
+    right_schema: &Schema,
+    token: &str,
+) -> Result<(bool, usize), String> {
+    if let Some((tbl, col)) = token.split_once('.') {
+        if tbl == left_table {
+            let idx = left_schema
+                .columns
+                .iter()
+                .position(|c| c.name == col)
+                .ok_or_else(|| format!("Unknown column '{}' in JOIN", token))?;
+            return Ok((true, idx));
+        }
+        if tbl == right_table {
+            let idx = right_schema
+                .columns
+                .iter()
+                .position(|c| c.name == col)
+                .ok_or_else(|| format!("Unknown column '{}' in JOIN", token))?;
+            return Ok((false, idx));
+        }
+        return Err(format!("Unknown table '{}' in JOIN", tbl));
+    }
+
+    let left_idx = left_schema.columns.iter().position(|c| c.name == token);
+    let right_idx = right_schema.columns.iter().position(|c| c.name == token);
+    match (left_idx, right_idx) {
+        (Some(i), None) => Ok((true, i)),
+        (None, Some(i)) => Ok((false, i)),
+        (Some(_), Some(_)) => Err(format!(
+            "Ambiguous column '{}' in JOIN. Qualify it as {}.{} or {}.{}",
+            token, left_table, token, right_table, token
+        )),
+        (None, None) => Err(format!("Unknown column '{}' in JOIN", token)),
+    }
+}
+
+fn resolve_column_index(schema: &Schema, name: &str, clause: &str) -> Result<usize, String> {
+    if let Some(idx) = schema.columns.iter().position(|c| c.name == name) {
+        return Ok(idx);
+    }
+    if name.contains('.') {
+        return Err(format!("Unknown column '{}' in {}", name, clause));
+    }
+
+    let suffix = format!(".{}", name);
+    let mut matches: Vec<usize> = Vec::new();
+    for (idx, c) in schema.columns.iter().enumerate() {
+        if c.name.ends_with(&suffix) {
+            matches.push(idx);
+        }
+    }
+    match matches.len() {
+        1 => Ok(matches[0]),
+        0 => Err(format!("Unknown column '{}' in {}", name, clause)),
+        _ => Err(format!(
+            "Ambiguous column '{}' in {}. Use qualified name table.column",
+            name, clause
+        )),
+    }
 }
 
 fn compare_for_order(a: Option<&Value>, b: Option<&Value>, asc: bool) -> Ordering {
@@ -561,11 +701,7 @@ fn project_rows(
 
     let mut selected: Vec<(usize, Column)> = Vec::new();
     for name in requested_columns {
-        let idx = schema
-            .columns
-            .iter()
-            .position(|c| c.name == *name)
-            .ok_or_else(|| format!("Unknown column '{}' in SELECT list", name))?;
+        let idx = resolve_column_index(schema, name, "SELECT list")?;
         selected.push((idx, schema.columns[idx].clone()));
     }
 
@@ -588,11 +724,7 @@ fn filter_rows(
     rows: &[Row],
     where_clause: &WhereClause,
 ) -> Result<Vec<Row>, String> {
-    let col_idx = schema
-        .columns
-        .iter()
-        .position(|c| c.name == where_clause.column)
-        .ok_or_else(|| format!("Unknown column '{}' in WHERE", where_clause.column))?;
+    let col_idx = resolve_column_index(schema, &where_clause.column, "WHERE")?;
 
     let col_dtype = &schema.columns[col_idx].dtype;
     let mut filtered: Vec<Row> = Vec::new();
