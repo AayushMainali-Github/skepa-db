@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    Null,
     Bool(bool),
     Int(i64),
     BigInt(i128),
@@ -20,6 +21,9 @@ pub enum Value {
 }
 
 pub fn parse_value(dtype: &DataType, token: &str) -> Result<Value, String>{
+    if token.eq_ignore_ascii_case("null") {
+        return Ok(Value::Null);
+    }
     match dtype {
         DataType::Bool => parse_bool(token).map(Value::Bool),
         DataType::Int => {
@@ -76,6 +80,7 @@ pub fn parse_value(dtype: &DataType, token: &str) -> Result<Value, String>{
 
 pub fn value_to_string(v: &Value) -> String {
     match v {
+        Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Int(n) => n.to_string(),
         Value::BigInt(n) => n.to_string(),

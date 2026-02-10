@@ -49,6 +49,8 @@ pub enum TableConstraintDef {
 pub enum ForeignKeyAction {
     Restrict,
     Cascade,
+    SetNull,
+    NoAction,
 }
 
 #[derive(Debug)]

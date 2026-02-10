@@ -176,6 +176,22 @@ impl Catalog {
                     return Err(format!("FOREIGN KEY references unknown column '{c}'"));
                 }
             }
+            if matches!(fk.on_delete, ForeignKeyAction::SetNull)
+                || matches!(fk.on_update, ForeignKeyAction::SetNull)
+            {
+                for c in &fk.columns {
+                    let child_col = columns
+                        .iter()
+                        .find(|col| &col.name == c)
+                        .ok_or_else(|| format!("FOREIGN KEY references unknown column '{c}'"))?;
+                    if child_col.not_null {
+                        return Err(format!(
+                            "FOREIGN KEY SET NULL requires nullable child column '{}'",
+                            c
+                        ));
+                    }
+                }
+            }
             let parent = self
                 .tables
                 .get(&fk.ref_table)
@@ -284,10 +300,14 @@ impl Catalog {
                             on_delete: match fk.on_delete {
                                 ForeignKeyAction::Restrict => "restrict".to_string(),
                                 ForeignKeyAction::Cascade => "cascade".to_string(),
+                                ForeignKeyAction::SetNull => "set null".to_string(),
+                                ForeignKeyAction::NoAction => "no action".to_string(),
                             },
                             on_update: match fk.on_update {
                                 ForeignKeyAction::Restrict => "restrict".to_string(),
                                 ForeignKeyAction::Cascade => "cascade".to_string(),
+                                ForeignKeyAction::SetNull => "set null".to_string(),
+                                ForeignKeyAction::NoAction => "no action".to_string(),
                             },
                         })
                         .collect(),
@@ -345,10 +365,14 @@ impl Catalog {
                             ref_columns: fk.ref_columns,
                             on_delete: match fk.on_delete.to_lowercase().as_str() {
                                 "cascade" => ForeignKeyAction::Cascade,
+                                "set null" => ForeignKeyAction::SetNull,
+                                "no action" => ForeignKeyAction::NoAction,
                                 _ => ForeignKeyAction::Restrict,
                             },
                             on_update: match fk.on_update.to_lowercase().as_str() {
                                 "cascade" => ForeignKeyAction::Cascade,
+                                "set null" => ForeignKeyAction::SetNull,
+                                "no action" => ForeignKeyAction::NoAction,
                                 _ => ForeignKeyAction::Restrict,
                             },
                         })

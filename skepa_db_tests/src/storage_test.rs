@@ -780,3 +780,35 @@ fn row_id_format_backward_compat_without_prefix() {
     let rows = std::fs::read_to_string(root.join("tables").join("users.rows")).unwrap();
     assert!(rows.lines().all(|l| l.starts_with('@')));
 }
+
+#[test]
+fn diskstorage_persists_null_values_roundtrip() {
+    let root = temp_dir("null_roundtrip");
+    {
+        let mut db = Database::open(root.clone());
+        db.execute("create table t (id int, name text)").unwrap();
+        db.execute("insert into t values (1, null)").unwrap();
+    }
+    {
+        let mut db = Database::open(root.clone());
+        assert_eq!(db.execute("select * from t").unwrap(), "id\tname\n1\tnull");
+    }
+}
+
+#[test]
+fn unique_index_does_not_block_multiple_null_values() {
+    let root = temp_dir("unique_null_index");
+    {
+        let mut db = Database::open(root.clone());
+        db.execute("create table t (id int, email text unique)").unwrap();
+        db.execute("insert into t values (1, null)").unwrap();
+        db.execute("insert into t values (2, null)").unwrap();
+    }
+    {
+        let mut db = Database::open(root.clone());
+        assert_eq!(
+            db.execute("select * from t").unwrap(),
+            "id\temail\n1\tnull\n2\tnull"
+        );
+    }
+}

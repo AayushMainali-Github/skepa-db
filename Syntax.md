@@ -2,12 +2,13 @@
 
 ## Create
 - Creates a new table with specified columns and data types.
-- **Syntax**: `create table <table> (<col> <type> [primary key|unique|not null], ..., [primary key(<col,...>)], [unique(<col,...>)], [foreign key(<col,...>) references <table>(<col,...>) [on delete restrict|cascade] [on update restrict|cascade]])`
+- **Syntax**: `create table <table> (<col> <type> [primary key|unique|not null], ..., [primary key(<col,...>)], [unique(<col,...>)], [foreign key(<col,...>) references <table>(<col,...>) [on delete restrict|cascade|set null|no action] [on update restrict|cascade|set null|no action]])`
 - **Examples**:
   - `create table users (id int primary key, name text not null, age int)`
   - `create table sessions (user_id int, device text, token text, primary key(user_id,device), unique(token))`
   - `create table orders (id int, user_id int, foreign key(user_id) references users(id))`
   - `create table order_items (id int, order_id int, foreign key(order_id) references orders(id) on delete cascade on update cascade)`
+  - `create table sessions (id int, user_id int, foreign key(user_id) references users(id) on delete set null on update no action)`
 
 ## Insert
 - Inserts one row into a table.
@@ -68,7 +69,7 @@
 - Table constraints (composite):
   - `primary key(col1,col2,...)`
   - `unique(col1,col2,...)`
-  - `foreign key(col1,col2,...) references parent_table(parent_col1,parent_col2,...) [on delete restrict|cascade] [on update restrict|cascade]`
+  - `foreign key(col1,col2,...) references parent_table(parent_col1,parent_col2,...) [on delete restrict|cascade|set null|no action] [on update restrict|cascade|set null|no action]`
 - Rules:
   - Only one primary key constraint is allowed per table.
   - Composite primary key must be declared as table-level `primary key(...)`.
@@ -77,3 +78,7 @@
   - `on update` defaults to `restrict` when omitted.
   - `on delete cascade` deletes matching child rows when parent rows are deleted.
   - `on update cascade` rewrites matching child key values when parent key values are updated.
+  - `on delete set null` sets child FK columns to `null` when parent rows are deleted.
+  - `on update set null` sets child FK columns to `null` when referenced parent keys are updated.
+  - `no action` currently behaves the same as immediate `restrict`.
+  - If any FK child column is `null`, referential check is skipped for that row.

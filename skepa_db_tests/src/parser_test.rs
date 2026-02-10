@@ -1028,7 +1028,7 @@ fn parse_foreign_key_on_delete_restrict() {
 
 #[test]
 fn parse_foreign_key_unknown_on_delete_action_errors() {
-    let err = parse("create table c (a int, foreign key(a) references p(id) on delete setnull)")
+    let err = parse("create table c (a int, foreign key(a) references p(id) on delete nope)")
         .unwrap_err();
     assert!(err.to_lowercase().contains("unknown on delete action"));
 }
@@ -1114,9 +1114,57 @@ fn parse_foreign_key_on_update_restrict() {
 
 #[test]
 fn parse_foreign_key_unknown_on_update_action_errors() {
-    let err = parse("create table c (a int, foreign key(a) references p(id) on update setnull)")
+    let err = parse("create table c (a int, foreign key(a) references p(id) on update nope)")
         .unwrap_err();
     assert!(err.to_lowercase().contains("unknown on update action"));
+}
+
+#[test]
+fn parse_foreign_key_on_delete_set_null() {
+    let cmd = parse(
+        "create table c (a int, foreign key(a) references p(id) on delete set null)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_foreign_key_on_update_set_null() {
+    let cmd = parse(
+        "create table c (a int, foreign key(a) references p(id) on update set null)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_foreign_key_on_delete_no_action() {
+    let cmd = parse(
+        "create table c (a int, foreign key(a) references p(id) on delete no action)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_foreign_key_on_update_no_action() {
+    let cmd = parse(
+        "create table c (a int, foreign key(a) references p(id) on update no action)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
 }
 
 #[test]

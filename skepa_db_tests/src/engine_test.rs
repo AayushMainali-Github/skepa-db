@@ -1636,3 +1636,112 @@ fn test_foreign_key_on_update_cascade_multiple_children_rows() {
     assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n1\t2\n2\t2");
 }
 
+#[test]
+fn test_foreign_key_on_delete_set_null_sets_child_to_null() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on delete set null)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+    db.execute("delete from p where id = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n1\tnull");
+}
+
+#[test]
+fn test_foreign_key_on_update_set_null_sets_child_to_null() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on update set null)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+    db.execute("update p set id = 2 where id = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n1\tnull");
+}
+
+#[test]
+fn test_foreign_key_set_null_requires_nullable_child_columns() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    let err = db
+        .execute("create table c (id int, pid int not null, foreign key(pid) references p(id) on delete set null)")
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("set null requires nullable"));
+}
+
+#[test]
+fn test_foreign_key_on_delete_no_action_behaves_like_restrict() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on delete no action)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+    let err = db.execute("delete from p where id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("restrict"));
+}
+
+#[test]
+fn test_foreign_key_on_update_no_action_behaves_like_restrict() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on update no action)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+    let err = db.execute("update p set id = 2 where id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("restrict"));
+}
+
+#[test]
+fn test_foreign_key_insert_with_null_child_key_is_allowed() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id))")
+        .unwrap();
+    db.execute("insert into c values (1, null)").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n1\tnull");
+}
+
+#[test]
+fn test_foreign_key_update_child_to_null_is_allowed() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id))")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+    db.execute("update c set pid = null where id = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n1\tnull");
+}
+
+#[test]
+fn test_composite_foreign_key_insert_with_partial_null_is_allowed() {
+    let mut db = test_db();
+    db.execute("create table p (a int, b int, primary key(a,b))")
+        .unwrap();
+    db.execute("create table c (id int, a int, b int, foreign key(a,b) references p(a,b))")
+        .unwrap();
+    db.execute("insert into c values (1, null, 2)").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\ta\tb\n1\tnull\t2");
+}
+
+#[test]
+fn test_unique_single_column_allows_multiple_nulls() {
+    let mut db = test_db();
+    db.execute("create table t (id int, email text unique)").unwrap();
+    db.execute("insert into t values (1, null)").unwrap();
+    db.execute("insert into t values (2, null)").unwrap();
+    assert_eq!(db.execute("select * from t").unwrap(), "id\temail\n1\tnull\n2\tnull");
+}
+
+#[test]
+fn test_unique_composite_allows_multiple_rows_with_null_member() {
+    let mut db = test_db();
+    db.execute("create table t (a int, b int, unique(a,b))").unwrap();
+    db.execute("insert into t values (1, null)").unwrap();
+    db.execute("insert into t values (1, null)").unwrap();
+    assert_eq!(db.execute("select * from t").unwrap(), "a\tb\n1\tnull\n1\tnull");
+}
+

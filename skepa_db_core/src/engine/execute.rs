@@ -418,6 +418,11 @@ fn validate_unique_constraints(
             if skip_idx == Some(row_idx) {
                 continue;
             }
+            if idxs.iter().any(|i| matches!(candidate.get(*i), Some(Value::Null)))
+                || idxs.iter().any(|i| matches!(existing.get(*i), Some(Value::Null)))
+            {
+                continue;
+            }
             let same = idxs.iter().all(|i| existing.get(*i) == candidate.get(*i));
             if same {
                 return Err(format!(
@@ -606,6 +611,12 @@ fn validate_outgoing_foreign_keys(
         let parent_rows = storage.scan(&fk.ref_table)?;
         let child_idxs = resolve_cols_to_idxs(schema, &fk.columns)?;
         let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
+        if child_idxs
+            .iter()
+            .any(|i| matches!(row.get(*i), Some(Value::Null)))
+        {
+            continue;
+        }
         let found = parent_rows.iter().any(|pr| tuple_eq(row, &child_idxs, pr, &parent_idxs));
         if !found {
             return Err(format!(
@@ -627,7 +638,7 @@ fn validate_restrict_on_parent_delete(
     parent_row: &Row,
 ) -> Result<(), String> {
     for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
-        if fk.on_delete != ForeignKeyAction::Restrict {
+        if !matches!(fk.on_delete, ForeignKeyAction::Restrict | ForeignKeyAction::NoAction) {
             continue;
         }
         let child_schema = catalog.schema(&child_table)?;
@@ -660,7 +671,7 @@ fn validate_restrict_on_parent_update(
             continue;
         }
         for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
-            if fk.on_update != ForeignKeyAction::Restrict {
+            if !matches!(fk.on_update, ForeignKeyAction::Restrict | ForeignKeyAction::NoAction) {
                 continue;
             }
             let child_schema = catalog.schema(&child_table)?;
@@ -703,6 +714,7 @@ fn apply_on_delete_cascade(
     if deleted_parent_rows.is_empty() {
         return Ok(());
     }
+    apply_on_delete_set_null(catalog, storage, parent_table, parent_schema, deleted_parent_rows)?;
     for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
         if fk.on_delete != ForeignKeyAction::Cascade {
             continue;
@@ -729,6 +741,52 @@ fn apply_on_delete_cascade(
     Ok(())
 }
 
+fn apply_on_delete_set_null(
+    catalog: &Catalog,
+    storage: &mut dyn StorageEngine,
+    parent_table: &str,
+    parent_schema: &Schema,
+    deleted_parent_rows: &[Row],
+) -> Result<(), String> {
+    for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
+        if fk.on_delete != ForeignKeyAction::SetNull {
+            continue;
+        }
+        let child_schema = catalog.schema(&child_table)?;
+        let child_rows = storage.scan(&child_table)?;
+        let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
+        let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
+
+        for ci in &child_idxs {
+            if child_schema.columns[*ci].not_null {
+                return Err(format!(
+                    "FOREIGN KEY SET NULL requires nullable child column '{}.{}'",
+                    child_table, child_schema.columns[*ci].name
+                ));
+            }
+        }
+
+        let mut updated_child_rows = child_rows.to_vec();
+        for cr in &mut updated_child_rows {
+            let referenced = deleted_parent_rows
+                .iter()
+                .any(|pr| tuple_eq(cr, &child_idxs, pr, &parent_idxs));
+            if referenced {
+                for ci in &child_idxs {
+                    cr[*ci] = Value::Null;
+                }
+            }
+        }
+
+        validate_all_unique_constraints(child_schema, &updated_child_rows)?;
+        validate_all_foreign_keys(catalog, storage, child_schema, &updated_child_rows)?;
+        let keep_old_indices: Vec<usize> = (0..updated_child_rows.len()).collect();
+        storage.replace_rows_with_alignment(&child_table, updated_child_rows, keep_old_indices)?;
+        storage.rebuild_indexes(&child_table, child_schema)?;
+    }
+    Ok(())
+}
+
 fn apply_on_update_cascade(
     catalog: &Catalog,
     storage: &mut dyn StorageEngine,
@@ -740,6 +798,7 @@ fn apply_on_update_cascade(
     if old_parent_rows.len() != new_parent_rows.len() {
         return Err("Internal error: parent row alignment mismatch during ON UPDATE CASCADE".to_string());
     }
+    apply_on_update_set_null(catalog, storage, parent_table, parent_schema, old_parent_rows, new_parent_rows)?;
     for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
         if fk.on_update != ForeignKeyAction::Cascade {
             continue;
@@ -757,6 +816,54 @@ fn apply_on_update_cascade(
                 {
                     for (ci, pi) in child_idxs.iter().zip(parent_idxs.iter()) {
                         cr[*ci] = new_pr[*pi].clone();
+                    }
+                }
+            }
+        }
+
+        validate_all_unique_constraints(child_schema, &updated_child_rows)?;
+        validate_all_foreign_keys(catalog, storage, child_schema, &updated_child_rows)?;
+        let keep_old_indices: Vec<usize> = (0..updated_child_rows.len()).collect();
+        storage.replace_rows_with_alignment(&child_table, updated_child_rows, keep_old_indices)?;
+        storage.rebuild_indexes(&child_table, child_schema)?;
+    }
+    Ok(())
+}
+
+fn apply_on_update_set_null(
+    catalog: &Catalog,
+    storage: &mut dyn StorageEngine,
+    parent_table: &str,
+    parent_schema: &Schema,
+    old_parent_rows: &[Row],
+    new_parent_rows: &[Row],
+) -> Result<(), String> {
+    for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
+        if fk.on_update != ForeignKeyAction::SetNull {
+            continue;
+        }
+        let child_schema = catalog.schema(&child_table)?;
+        let child_rows = storage.scan(&child_table)?;
+        let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
+        let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
+
+        for ci in &child_idxs {
+            if child_schema.columns[*ci].not_null {
+                return Err(format!(
+                    "FOREIGN KEY SET NULL requires nullable child column '{}.{}'",
+                    child_table, child_schema.columns[*ci].name
+                ));
+            }
+        }
+
+        let mut updated_child_rows = child_rows.to_vec();
+        for cr in &mut updated_child_rows {
+            for (old_pr, new_pr) in old_parent_rows.iter().zip(new_parent_rows.iter()) {
+                if tuple_eq(cr, &child_idxs, old_pr, &parent_idxs)
+                    && !tuple_eq(old_pr, &parent_idxs, new_pr, &parent_idxs)
+                {
+                    for ci in &child_idxs {
+                        cr[*ci] = Value::Null;
                     }
                 }
             }

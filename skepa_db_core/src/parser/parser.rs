@@ -554,36 +554,22 @@ fn parse_table_constraint_in_create(
         let mut on_update = ForeignKeyAction::Restrict;
 
         loop {
-            if next + 2 < end
+            if next + 1 < end
                 && tokens[next].eq_ignore_ascii_case("on")
                 && tokens[next + 1].eq_ignore_ascii_case("delete")
             {
-                on_delete = match tokens[next + 2].to_lowercase().as_str() {
-                    "restrict" => ForeignKeyAction::Restrict,
-                    "cascade" => ForeignKeyAction::Cascade,
-                    other => {
-                        return Err(format!(
-                            "Unknown ON DELETE action '{other}'. Use restrict|cascade"
-                        ))
-                    }
-                };
-                next += 3;
+                let (action, consumed) = parse_foreign_key_action(tokens, next + 2, end, "DELETE")?;
+                on_delete = action;
+                next = next + 2 + consumed;
                 continue;
             }
-            if next + 2 < end
+            if next + 1 < end
                 && tokens[next].eq_ignore_ascii_case("on")
                 && tokens[next + 1].eq_ignore_ascii_case("update")
             {
-                on_update = match tokens[next + 2].to_lowercase().as_str() {
-                    "restrict" => ForeignKeyAction::Restrict,
-                    "cascade" => ForeignKeyAction::Cascade,
-                    other => {
-                        return Err(format!(
-                            "Unknown ON UPDATE action '{other}'. Use restrict|cascade"
-                        ))
-                    }
-                };
-                next += 3;
+                let (action, consumed) = parse_foreign_key_action(tokens, next + 2, end, "UPDATE")?;
+                on_update = action;
+                next = next + 2 + consumed;
                 continue;
             }
             break;
@@ -600,6 +586,46 @@ fn parse_table_constraint_in_create(
         ));
     }
     Err("Unknown table constraint".to_string())
+}
+
+fn parse_foreign_key_action(
+    tokens: &[String],
+    start: usize,
+    end: usize,
+    action_kind: &str,
+) -> Result<(ForeignKeyAction, usize), String> {
+    if start >= end {
+        return Err(format!(
+            "Unknown ON {action_kind} action ''. Use restrict|cascade|set null|no action"
+        ));
+    }
+
+    let t0 = tokens[start].to_lowercase();
+    match t0.as_str() {
+        "restrict" => Ok((ForeignKeyAction::Restrict, 1)),
+        "cascade" => Ok((ForeignKeyAction::Cascade, 1)),
+        "set" => {
+            if start + 1 < end && tokens[start + 1].eq_ignore_ascii_case("null") {
+                Ok((ForeignKeyAction::SetNull, 2))
+            } else {
+                Err(format!(
+                    "Unknown ON {action_kind} action 'set'. Use restrict|cascade|set null|no action"
+                ))
+            }
+        }
+        "no" => {
+            if start + 1 < end && tokens[start + 1].eq_ignore_ascii_case("action") {
+                Ok((ForeignKeyAction::NoAction, 2))
+            } else {
+                Err(format!(
+                    "Unknown ON {action_kind} action 'no'. Use restrict|cascade|set null|no action"
+                ))
+            }
+        }
+        other => Err(format!(
+            "Unknown ON {action_kind} action '{other}'. Use restrict|cascade|set null|no action"
+        )),
+    }
 }
 
 fn parse_column_name_list(

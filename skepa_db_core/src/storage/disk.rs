@@ -394,6 +394,13 @@ impl StorageEngine for DiskStorage {
             None => return Ok(None),
         };
         for idx in indexes {
+            let has_null = idx
+                .col_idxs
+                .iter()
+                .any(|i| matches!(candidate.get(*i), Some(Value::Null)));
+            if has_null {
+                continue;
+            }
             let parts = idx
                 .col_idxs
                 .iter()
@@ -590,6 +597,12 @@ impl DiskStorage {
             }
             let mut map: BTreeMap<String, u64> = BTreeMap::new();
             for (row_idx, row) in rows.iter().enumerate() {
+                if col_idxs
+                    .iter()
+                    .any(|i| matches!(row.get(*i), Some(Value::Null)))
+                {
+                    continue;
+                }
                 let parts = col_idxs
                     .iter()
                     .map(|i| {
@@ -673,6 +686,7 @@ fn validate_snapshot_entries(
 
 fn encode_value(v: &Value) -> String {
     match v {
+        Value::Null => "n:".to_string(),
         Value::Bool(b) => format!("o:{}", if *b { "1" } else { "0" }),
         Value::Int(n) => format!("i:{n}"),
         Value::BigInt(n) => format!("g:{n}"),
@@ -691,6 +705,9 @@ fn decode_token(token: &str, dtype: &DataType) -> Result<String, String> {
     let (prefix, raw) = token
         .split_once(':')
         .ok_or_else(|| format!("Malformed value token '{token}'"))?;
+    if prefix == "n" {
+        return Ok("null".to_string());
+    }
     match dtype {
         DataType::Bool => {
             if prefix != "o" {
