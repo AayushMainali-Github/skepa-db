@@ -1729,6 +1729,92 @@ fn test_foreign_key_no_action_commit_fails_if_still_violated() {
 }
 
 #[test]
+fn test_alter_add_unique_enforces_existing_data() {
+    let mut db = test_db();
+    db.execute("create table t (id int, email text)").unwrap();
+    db.execute(r#"insert into t values (1, "a@x.com")"#).unwrap();
+    db.execute(r#"insert into t values (2, "a@x.com")"#).unwrap();
+    let err = db.execute("alter table t add unique(email)").unwrap_err();
+    assert!(err.to_lowercase().contains("unique"));
+}
+
+#[test]
+fn test_alter_add_and_drop_unique() {
+    let mut db = test_db();
+    db.execute("create table t (id int, email text)").unwrap();
+    db.execute("alter table t add unique(email)").unwrap();
+    db.execute(r#"insert into t values (1, "a@x.com")"#).unwrap();
+    let err = db.execute(r#"insert into t values (2, "a@x.com")"#).unwrap_err();
+    assert!(err.to_lowercase().contains("unique"));
+    db.execute("alter table t drop unique(email)").unwrap();
+    db.execute(r#"insert into t values (2, "a@x.com")"#).unwrap();
+}
+
+#[test]
+fn test_alter_add_foreign_key_enforces_existing_rows() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+    db.execute("insert into c values (2, 99)").unwrap();
+    let err = db
+        .execute("alter table c add foreign key(pid) references p(id)")
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("foreign key"));
+}
+
+#[test]
+fn test_alter_add_and_drop_foreign_key() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+    db.execute("alter table c add foreign key(pid) references p(id)")
+        .unwrap();
+    let err = db.execute("insert into c values (2, 99)").unwrap_err();
+    assert!(err.to_lowercase().contains("foreign key"));
+    db.execute("alter table c drop foreign key(pid) references p(id)")
+        .unwrap();
+    db.execute("insert into c values (2, 99)").unwrap();
+}
+
+#[test]
+fn test_alter_set_not_null_enforces_existing_rows() {
+    let mut db = test_db();
+    db.execute("create table t (id int, name text)").unwrap();
+    db.execute("insert into t values (1, null)").unwrap();
+    let err = db
+        .execute("alter table t alter column name set not null")
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("not null"));
+}
+
+#[test]
+fn test_alter_set_and_drop_not_null() {
+    let mut db = test_db();
+    db.execute("create table t (id int, name text)").unwrap();
+    db.execute("insert into t values (1, \"a\")").unwrap();
+    db.execute("alter table t alter column name set not null").unwrap();
+    let err = db.execute("insert into t values (2, null)").unwrap_err();
+    assert!(err.to_lowercase().contains("not null"));
+    db.execute("alter table t alter column name drop not null")
+        .unwrap();
+    db.execute("insert into t values (2, null)").unwrap();
+}
+
+#[test]
+fn test_alter_table_not_allowed_inside_transaction() {
+    let mut db = test_db();
+    db.execute("create table t (id int)").unwrap();
+    db.execute("begin").unwrap();
+    let err = db.execute("alter table t add unique(id)").unwrap_err();
+    assert!(err.to_lowercase().contains("auto-commit"));
+    db.execute("rollback").unwrap();
+}
+
+#[test]
 fn test_foreign_key_insert_with_null_child_key_is_allowed() {
     let mut db = test_db();
     db.execute("create table p (id int primary key)").unwrap();

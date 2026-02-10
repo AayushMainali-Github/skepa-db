@@ -1,5 +1,5 @@
 use crate::engine::format::format_select;
-use crate::parser::command::{Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, TableConstraintDef, WhereClause};
+use crate::parser::command::{AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, TableConstraintDef, WhereClause};
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, Value};
@@ -19,6 +19,7 @@ pub fn execute_command(
             columns,
             table_constraints,
         } => handle_create(table, columns, table_constraints, catalog, storage),
+        Command::Alter { table, action } => handle_alter(table, action, catalog, storage),
         Command::Insert { table, values } => handle_insert(table, values, catalog, storage),
         Command::Update {
             table,
@@ -35,6 +36,88 @@ pub fn execute_command(
             Err("Transaction control is handled by Database".to_string())
         }
     }
+}
+
+fn handle_alter(
+    table: String,
+    action: AlterAction,
+    catalog: &mut Catalog,
+    storage: &mut dyn StorageEngine,
+) -> Result<String, String> {
+    let before = catalog.clone();
+    let result = match action {
+        AlterAction::AddUnique(cols) => {
+            catalog.add_unique_constraint(&table, cols.clone())?;
+            let schema = catalog.schema(&table)?;
+            let rows = storage.scan(&table)?;
+            validate_all_unique_constraints(schema, rows)?;
+            storage.rebuild_indexes(&table, schema)?;
+            Ok(format!("altered table {}: added unique({})", table, cols.join(",")))
+        }
+        AlterAction::DropUnique(cols) => {
+            catalog.drop_unique_constraint(&table, &cols)?;
+            let schema = catalog.schema(&table)?;
+            storage.rebuild_indexes(&table, schema)?;
+            Ok(format!("altered table {}: dropped unique({})", table, cols.join(",")))
+        }
+        AlterAction::AddForeignKey {
+            columns,
+            ref_table,
+            ref_columns,
+            on_delete,
+            on_update,
+        } => {
+            catalog.add_foreign_key_constraint(
+                &table,
+                ForeignKeyDef {
+                    columns: columns.clone(),
+                    ref_table: ref_table.clone(),
+                    ref_columns: ref_columns.clone(),
+                    on_delete,
+                    on_update,
+                },
+            )?;
+            let schema = catalog.schema(&table)?;
+            let rows = storage.scan(&table)?;
+            validate_all_foreign_keys(catalog, storage, schema, rows)?;
+            Ok(format!(
+                "altered table {}: added foreign key({}) references {}({})",
+                table,
+                columns.join(","),
+                ref_table,
+                ref_columns.join(",")
+            ))
+        }
+        AlterAction::DropForeignKey {
+            columns,
+            ref_table,
+            ref_columns,
+        } => {
+            catalog.drop_foreign_key_constraint(&table, &columns, &ref_table, &ref_columns)?;
+            Ok(format!(
+                "altered table {}: dropped foreign key({}) references {}({})",
+                table,
+                columns.join(","),
+                ref_table,
+                ref_columns.join(",")
+            ))
+        }
+        AlterAction::SetNotNull(col) => {
+            catalog.set_not_null(&table, &col, true)?;
+            let schema = catalog.schema(&table)?;
+            let rows = storage.scan(&table)?;
+            validate_not_null_columns(schema, rows)?;
+            Ok(format!("altered table {}: set {} not null", table, col))
+        }
+        AlterAction::DropNotNull(col) => {
+            catalog.set_not_null(&table, &col, false)?;
+            Ok(format!("altered table {}: dropped not null on {}", table, col))
+        }
+    };
+    if result.is_err() {
+        *catalog = before;
+    }
+    result
 }
 
 pub fn validate_no_action_constraints(
@@ -480,6 +563,17 @@ fn validate_unique_constraints(
 fn validate_all_unique_constraints(schema: &Schema, rows: &[Row]) -> Result<(), String> {
     for idx in 0..rows.len() {
         validate_unique_constraints(schema, rows, &rows[idx], Some(idx))?;
+    }
+    Ok(())
+}
+
+fn validate_not_null_columns(schema: &Schema, rows: &[Row]) -> Result<(), String> {
+    for row in rows {
+        for (idx, col) in schema.columns.iter().enumerate() {
+            if col.not_null && matches!(row.get(idx), Some(Value::Null)) {
+                return Err(format!("Column '{}' is NOT NULL", col.name));
+            }
+        }
     }
     Ok(())
 }

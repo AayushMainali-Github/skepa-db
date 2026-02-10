@@ -53,6 +53,26 @@ pub enum ForeignKeyAction {
     NoAction,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum AlterAction {
+    AddUnique(Vec<String>),
+    DropUnique(Vec<String>),
+    AddForeignKey {
+        columns: Vec<String>,
+        ref_table: String,
+        ref_columns: Vec<String>,
+        on_delete: ForeignKeyAction,
+        on_update: ForeignKeyAction,
+    },
+    DropForeignKey {
+        columns: Vec<String>,
+        ref_table: String,
+        ref_columns: Vec<String>,
+    },
+    SetNotNull(String),
+    DropNotNull(String),
+}
+
 #[derive(Debug)]
 pub enum Command {
     Begin,
@@ -63,6 +83,10 @@ pub enum Command {
         table: String,
         columns: Vec<ColumnDef>,
         table_constraints: Vec<TableConstraintDef>,
+    },
+    Alter {
+        table: String,
+        action: AlterAction,
     },
 
     Insert {

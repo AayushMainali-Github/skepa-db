@@ -10,6 +10,20 @@
   - `create table order_items (id int, order_id int, foreign key(order_id) references orders(id) on delete cascade on update cascade)`
   - `create table sessions (id int, user_id int, foreign key(user_id) references users(id) on delete set null on update no action)`
 
+## Alter
+- Alters constraints on an existing table.
+- **Syntax**:
+  - `alter table <table> add unique(<col,...>)`
+  - `alter table <table> drop unique(<col,...>)`
+  - `alter table <table> add foreign key(<col,...>) references <table>(<col,...>) [on delete restrict|cascade|set null|no action] [on update restrict|cascade|set null|no action]`
+  - `alter table <table> drop foreign key(<col,...>) references <table>(<col,...>)`
+  - `alter table <table> alter column <col> set not null`
+  - `alter table <table> alter column <col> drop not null`
+- Notes:
+  - `create/alter table` are auto-commit operations and are rejected inside active transactions.
+  - `add unique(...)` and `add foreign key(...)` validate existing table rows.
+  - `set not null` validates existing rows and fails if any row has `null` in that column.
+
 ## Insert
 - Inserts one row into a table.
 - **Syntax**: `insert into <table> values (<val>, <val>, ...)`
