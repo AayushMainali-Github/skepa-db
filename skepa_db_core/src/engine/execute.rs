@@ -2,7 +2,7 @@ use crate::engine::format::format_select;
 use crate::parser::command::{AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, OrderBy, TableConstraintDef, WhereClause};
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
-use crate::types::value::{parse_value, Value};
+use crate::types::value::{parse_value, value_to_string, Value};
 use crate::types::Row;
 use std::cmp::Ordering;
 use crate::storage::schema::ForeignKeyDef;
@@ -391,13 +391,28 @@ fn build_join_rows(
         });
     }
 
+    // Join planning: build a hash index on the right side join key.
+    // This preserves left-table output order while avoiding O(n*m) scans.
+    let mut right_key_to_rows: std::collections::HashMap<String, Vec<Row>> = std::collections::HashMap::new();
+    for rr in right_rows {
+        let Some(k) = rr.get(ridx) else { continue };
+        if matches!(k, Value::Null) {
+            continue;
+        }
+        right_key_to_rows
+            .entry(value_to_string(k))
+            .or_default()
+            .push(rr.clone());
+    }
+
     let mut out_rows: Vec<Row> = Vec::new();
     for lr in left_rows {
-        for rr in right_rows {
-            if matches!(lr.get(lidx), Some(Value::Null)) || matches!(rr.get(ridx), Some(Value::Null)) {
-                continue;
-            }
-            if lr.get(lidx) == rr.get(ridx) {
+        let Some(left_key) = lr.get(lidx) else { continue };
+        if matches!(left_key, Value::Null) {
+            continue;
+        }
+        if let Some(matching_right_rows) = right_key_to_rows.get(&value_to_string(left_key)) {
+            for rr in matching_right_rows {
                 let mut row = lr.clone();
                 row.extend(rr.clone());
                 out_rows.push(row);

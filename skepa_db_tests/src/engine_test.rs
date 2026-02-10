@@ -477,6 +477,40 @@ fn test_select_inner_join_null_join_key_does_not_match() {
 }
 
 #[test]
+fn test_select_inner_join_one_to_many_returns_all_matches() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text)").unwrap();
+    db.execute("create table posts (user_id int, title text)").unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    db.execute(r#"insert into users values (2, "avi")"#).unwrap();
+    db.execute(r#"insert into posts values (1, "p1")"#).unwrap();
+    db.execute(r#"insert into posts values (1, "p2")"#).unwrap();
+    db.execute(r#"insert into posts values (2, "p3")"#).unwrap();
+
+    let out = db
+        .execute("select users.id,posts.title from users join posts on users.id = posts.user_id order by posts.title asc")
+        .unwrap();
+    assert_eq!(out, "users.id\tposts.title\n1\tp1\n1\tp2\n2\tp3");
+}
+
+#[test]
+fn test_select_inner_join_many_to_one_returns_all_matches() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute("create table city_info (city text, zone text)").unwrap();
+    db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (2, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (3, "la")"#).unwrap();
+    db.execute(r#"insert into city_info values ("ny", "east")"#).unwrap();
+    db.execute(r#"insert into city_info values ("la", "west")"#).unwrap();
+
+    let out = db
+        .execute("select users.id,city_info.zone from users join city_info on users.city = city_info.city order by users.id asc")
+        .unwrap();
+    assert_eq!(out, "users.id\tcity_info.zone\n1\teast\n2\teast\n3\twest");
+}
+
+#[test]
 fn test_update_unknown_set_column_errors() {
     let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
