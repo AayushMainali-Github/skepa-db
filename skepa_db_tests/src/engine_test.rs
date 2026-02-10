@@ -1994,3 +1994,157 @@ fn test_foreign_key_on_update_cascade_propagates_to_grandchildren() {
     assert_eq!(db.execute("select * from g").unwrap(), "id\tcid\n100\t2");
 }
 
+
+fn seed_users_3(db: &mut Database) {
+    db.execute("create table users (id int, name text, age int)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "a", 30)"#).unwrap();
+    db.execute(r#"insert into users values (2, "b", 20)"#).unwrap();
+    db.execute(r#"insert into users values (3, "c", 10)"#).unwrap();
+}
+
+fn row_count(output: &str) -> usize {
+    let lines: Vec<&str> = output.lines().collect();
+    if lines.is_empty() {
+        0
+    } else {
+        lines.len() - 1
+    }
+}
+
+macro_rules! limit_cases {
+    ($( $name:ident => ($limit:expr, $expected:expr) ),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                let mut db = test_db();
+                seed_users_3(&mut db);
+                let out = db
+                    .execute(&format!("select * from users order by id asc limit {}", $limit))
+                    .unwrap();
+                assert_eq!(row_count(&out), $expected);
+            }
+        )*
+    };
+}
+
+limit_cases!(
+    engine_more_limit_00 => (0, 0),
+    engine_more_limit_01 => (1, 1),
+    engine_more_limit_02 => (2, 2),
+    engine_more_limit_03 => (3, 3),
+    engine_more_limit_04 => (4, 3),
+    engine_more_limit_05 => (5, 3),
+    engine_more_limit_06 => (6, 3),
+    engine_more_limit_07 => (7, 3),
+    engine_more_limit_08 => (8, 3),
+    engine_more_limit_09 => (9, 3),
+    engine_more_limit_10 => (10, 3),
+    engine_more_limit_11 => (11, 3),
+    engine_more_limit_12 => (12, 3),
+    engine_more_limit_13 => (13, 3),
+    engine_more_limit_14 => (14, 3),
+    engine_more_limit_15 => (15, 3),
+    engine_more_limit_16 => (16, 3),
+    engine_more_limit_17 => (17, 3),
+    engine_more_limit_18 => (18, 3),
+    engine_more_limit_19 => (19, 3),
+    engine_more_limit_20 => (20, 3),
+    engine_more_limit_21 => (21, 3),
+    engine_more_limit_22 => (22, 3),
+    engine_more_limit_23 => (23, 3),
+    engine_more_limit_24 => (24, 3),
+);
+
+macro_rules! order_cases {
+    ($( $name:ident => $sql:expr ),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                let mut db = test_db();
+                seed_users_3(&mut db);
+                let out = db.execute($sql).unwrap();
+                assert!(!out.trim().is_empty());
+                assert!(out.lines().count() >= 1);
+            }
+        )*
+    };
+}
+
+order_cases!(
+    engine_more_order_01 => "select * from users order by id asc",
+    engine_more_order_02 => "select * from users order by id desc",
+    engine_more_order_03 => "select * from users order by age asc",
+    engine_more_order_04 => "select * from users order by age desc",
+    engine_more_order_05 => "select * from users order by name asc",
+    engine_more_order_06 => "select * from users order by name desc",
+    engine_more_order_07 => "select id from users order by id asc",
+    engine_more_order_08 => "select id from users order by id desc",
+    engine_more_order_09 => "select name from users order by age asc",
+    engine_more_order_10 => "select name from users order by age desc",
+    engine_more_order_11 => "select * from users where age gte 10 order by id asc",
+    engine_more_order_12 => "select * from users where age gte 10 order by id desc",
+    engine_more_order_13 => "select * from users where name like \"*\" order by name asc",
+    engine_more_order_14 => "select * from users where name like \"*\" order by name desc",
+    engine_more_order_15 => "select id,name from users order by name asc limit 2",
+    engine_more_order_16 => "select id,name from users order by name desc limit 2",
+    engine_more_order_17 => "select id,name from users where id gte 1 order by id asc limit 2",
+    engine_more_order_18 => "select id,name from users where id gte 1 order by id desc limit 2",
+    engine_more_order_19 => "select id,name from users where id lte 3 order by age asc limit 3",
+    engine_more_order_20 => "select id,name from users where id lte 3 order by age desc limit 3"
+);
+
+macro_rules! index_eq_cases {
+    ($( $name:ident => $city:expr ),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                let mut db = test_db();
+                db.execute("create table users (id int, city text, score int)")
+                    .unwrap();
+                db.execute("create index on users (city)").unwrap();
+                db.execute(r#"insert into users values (1, "ny", 10)"#).unwrap();
+                db.execute(r#"insert into users values (2, "ny", 20)"#).unwrap();
+                db.execute(r#"insert into users values (3, "la", 30)"#).unwrap();
+                let out = db
+                    .execute(&format!(r#"select * from users where city = "{}""#, $city))
+                    .unwrap();
+                if $city == "ny" {
+                    assert_eq!(row_count(&out), 2);
+                } else if $city == "la" {
+                    assert_eq!(row_count(&out), 1);
+                } else {
+                    assert_eq!(row_count(&out), 0);
+                }
+            }
+        )*
+    };
+}
+
+index_eq_cases!(
+    engine_more_index_eq_01 => "ny",
+    engine_more_index_eq_02 => "la",
+    engine_more_index_eq_03 => "sf",
+    engine_more_index_eq_04 => "ny",
+    engine_more_index_eq_05 => "la",
+    engine_more_index_eq_06 => "sf",
+    engine_more_index_eq_07 => "ny",
+    engine_more_index_eq_08 => "la",
+    engine_more_index_eq_09 => "sf",
+    engine_more_index_eq_10 => "ny",
+    engine_more_index_eq_11 => "la",
+    engine_more_index_eq_12 => "sf",
+    engine_more_index_eq_13 => "ny",
+    engine_more_index_eq_14 => "la",
+    engine_more_index_eq_15 => "sf",
+);
+
+#[test]
+fn engine_more_order_by_unknown_column_errors() {
+    let mut db = test_db();
+    seed_users_3(&mut db);
+    let err = db.execute("select * from users order by missing asc").unwrap_err();
+    assert!(err.to_lowercase().contains("unknown column"));
+}
+
+

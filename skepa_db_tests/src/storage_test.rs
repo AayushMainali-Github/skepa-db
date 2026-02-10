@@ -829,3 +829,56 @@ fn secondary_index_persists_across_reopen() {
         assert_eq!(out, "id\tcity\n1\tny");
     }
 }
+
+macro_rules! reopen_select_cases {
+    ($( $name:ident => ($city:expr, $expected_rows:expr) ),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                let path = temp_dir("reopen_select");
+                {
+                    let mut db = Database::open(path.clone());
+                    db.execute("create table users (id int, city text)").unwrap();
+                    db.execute("create index on users (city)").unwrap();
+                    db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+                    db.execute(r#"insert into users values (2, "la")"#).unwrap();
+                    db.execute(r#"insert into users values (3, "ny")"#).unwrap();
+                }
+                {
+                    let mut db = Database::open(path.clone());
+                    let out = db
+                        .execute(&format!(r#"select * from users where city = "{}" order by id asc"#, $city))
+                        .unwrap();
+                    let rows = if out.is_empty() { 0 } else { out.lines().count() - 1 };
+                    assert_eq!(rows, $expected_rows);
+                }
+            }
+        )*
+    };
+}
+
+reopen_select_cases!(
+    storage_more_reopen_01 => ("ny", 2),
+    storage_more_reopen_02 => ("la", 1),
+    storage_more_reopen_03 => ("sf", 0),
+    storage_more_reopen_04 => ("ny", 2),
+    storage_more_reopen_05 => ("la", 1),
+    storage_more_reopen_06 => ("sf", 0),
+    storage_more_reopen_07 => ("ny", 2),
+    storage_more_reopen_08 => ("la", 1),
+    storage_more_reopen_09 => ("sf", 0),
+    storage_more_reopen_10 => ("ny", 2),
+    storage_more_reopen_11 => ("la", 1),
+    storage_more_reopen_12 => ("sf", 0),
+    storage_more_reopen_13 => ("ny", 2),
+    storage_more_reopen_14 => ("la", 1),
+    storage_more_reopen_15 => ("sf", 0),
+    storage_more_reopen_16 => ("ny", 2),
+    storage_more_reopen_17 => ("la", 1),
+    storage_more_reopen_18 => ("sf", 0),
+    storage_more_reopen_19 => ("ny", 2),
+    storage_more_reopen_20 => ("la", 1)
+);
+
+
+

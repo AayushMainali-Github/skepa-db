@@ -1426,3 +1426,135 @@ fn parse_select_with_limit_only() {
         _ => panic!("Expected Select command"),
     }
 }
+
+macro_rules! parse_ok_cases {
+    ($( $name:ident => $sql:expr ),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                let out = parse($sql);
+                assert!(out.is_ok(), "parse failed for '{}': {:?}", $sql, out.err());
+            }
+        )*
+    };
+}
+
+macro_rules! parse_err_cases {
+    ($( $name:ident => $sql:expr ),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                assert!(parse($sql).is_err(), "expected parse error for '{}'", $sql);
+            }
+        )*
+    };
+}
+
+parse_ok_cases!(
+    parse_more_select_order_limit_01 => "select * from t order by a",
+    parse_more_select_order_limit_02 => "select * from t order by a asc",
+    parse_more_select_order_limit_03 => "select * from t order by a desc",
+    parse_more_select_order_limit_04 => "select * from t limit 0",
+    parse_more_select_order_limit_05 => "select * from t limit 5",
+    parse_more_select_order_limit_06 => "select * from t where a = 1 order by a",
+    parse_more_select_order_limit_07 => "select * from t where a = 1 order by a desc",
+    parse_more_select_order_limit_08 => "select * from t where a = 1 limit 3",
+    parse_more_select_order_limit_09 => "select * from t where a = 1 order by a asc limit 3",
+    parse_more_select_order_limit_10 => "select id,name from t order by name desc limit 2",
+    parse_more_select_order_limit_11 => "select id from t where a gt 1 order by id asc limit 1",
+    parse_more_select_order_limit_12 => "select id from t where a lt 1 order by id desc limit 10",
+    parse_more_select_order_limit_13 => "select id from t where a gte 1 order by id limit 10",
+    parse_more_select_order_limit_14 => "select id from t where a lte 1 order by id limit 10",
+    parse_more_select_order_limit_15 => "select id from t where name like \"a*\" order by id limit 10",
+    parse_more_select_order_limit_16 => "SeLeCt * FrOm t OrDeR By a DeSc LiMiT 1",
+    parse_more_select_order_limit_17 => "select * from t where a = 1 ORDER BY a ASC LIMIT 1",
+    parse_more_select_order_limit_18 => "select * from t where a eq 1 order by a limit 1",
+    parse_more_select_order_limit_19 => "select a,b,c from t order by b desc limit 99",
+    parse_more_select_order_limit_20 => "select * from t where name like \"?\" order by name asc limit 7",
+    parse_more_index_01 => "create index on t (a)",
+    parse_more_index_02 => "create index on t (a,b)",
+    parse_more_index_03 => "drop index on t (a)",
+    parse_more_index_04 => "drop index on t (a,b)",
+    parse_more_index_05 => "CrEaTe InDeX On t (a)",
+    parse_more_index_06 => "DrOp InDeX On t (a)",
+    parse_more_index_07 => "create index on t(a)",
+    parse_more_index_08 => "drop index on t(a)",
+    parse_more_index_09 => "create index on t (a , b , c)",
+    parse_more_index_10 => "drop index on t (a , b , c)",
+    parse_more_alter_01 => "alter table t add unique(a)",
+    parse_more_alter_02 => "alter table t add unique(a,b)",
+    parse_more_alter_03 => "alter table t drop unique(a)",
+    parse_more_alter_04 => "alter table t alter column a set not null",
+    parse_more_alter_05 => "alter table t alter column a drop not null",
+    parse_more_alter_06 => "alter table c add foreign key(a) references p(id)",
+    parse_more_alter_07 => "alter table c add foreign key(a,b) references p(x,y)",
+    parse_more_alter_08 => "alter table c drop foreign key(a) references p(id)",
+    parse_more_alter_09 => "alter table c add foreign key(a) references p(id) on delete cascade",
+    parse_more_alter_10 => "alter table c add foreign key(a) references p(id) on update no action",
+    parse_more_select_combo_01 => "select * from t where a = 1 order by a desc limit 0",
+    parse_more_select_combo_02 => "select a from t where a = 1 order by a desc limit 1",
+    parse_more_select_combo_03 => "select a from t where a = 1 order by a desc limit 2",
+    parse_more_select_combo_04 => "select a from t where a = 1 order by a desc limit 3",
+    parse_more_select_combo_05 => "select a from t where a = 1 order by a desc limit 4",
+    parse_more_select_combo_06 => "select a from t where a = 1 order by a desc limit 5",
+    parse_more_select_combo_07 => "select a from t where a = 1 order by a desc limit 6",
+    parse_more_select_combo_08 => "select a from t where a = 1 order by a desc limit 7",
+    parse_more_select_combo_09 => "select a from t where a = 1 order by a desc limit 8",
+    parse_more_select_combo_10 => "select a from t where a = 1 order by a desc limit 9",
+    parse_more_select_combo_11 => "select a from t where a = 1 order by a asc limit 1",
+    parse_more_select_combo_12 => "select a from t where a = 1 order by a asc limit 2",
+    parse_more_select_combo_13 => "select a from t where a = 1 order by a asc limit 3",
+    parse_more_select_combo_14 => "select a from t where a = 1 order by a asc limit 4",
+    parse_more_select_combo_15 => "select a from t where a = 1 order by a asc limit 5",
+    parse_more_select_combo_16 => "select a from t where a = 1 order by a asc limit 6",
+    parse_more_select_combo_17 => "select a from t where a = 1 order by a asc limit 7",
+    parse_more_select_combo_18 => "select a from t where a = 1 order by a asc limit 8",
+    parse_more_select_combo_19 => "select a from t where a = 1 order by a asc limit 9",
+    parse_more_select_combo_20 => "select a from t where a = 1 order by a asc limit 10"
+);
+
+parse_err_cases!(
+    parse_more_err_01 => "select * from t order a",
+    parse_more_err_02 => "select * from t order by",
+    parse_more_err_03 => "select * from t order by a middle",
+    parse_more_err_04 => "select * from t limit",
+    parse_more_err_05 => "select * from t limit -1",
+    parse_more_err_06 => "select * from t limit x",
+    parse_more_err_07 => "select * from t where a = 1 limit",
+    parse_more_err_08 => "select * from t where a = 1 order by",
+    parse_more_err_09 => "create index t (a)",
+    parse_more_err_10 => "create index on t a",
+    parse_more_err_11 => "drop index t (a)",
+    parse_more_err_12 => "drop index on t a",
+    parse_more_err_13 => "alter table t add",
+    parse_more_err_14 => "alter table t drop",
+    parse_more_err_15 => "alter table t alter",
+    parse_more_err_16 => "alter table t alter column a set",
+    parse_more_err_17 => "alter table t alter column a drop",
+    parse_more_err_18 => "select * from t order by a desc limit",
+    parse_more_err_19 => "select * from t order by a desc limit none",
+    parse_more_err_20 => "select * from t where a = 1 order by a desc limit 1 extra"
+);
+
+#[test]
+fn parse_more_select_struct_fields_are_populated() {
+    let cmd = parse("select id from users where age gte 18 order by id desc limit 4").unwrap();
+    match cmd {
+        Command::Select {
+            table,
+            columns,
+            filter,
+            order_by,
+            limit,
+        } => {
+            assert_eq!(table, "users");
+            assert_eq!(columns.unwrap(), vec!["id"]);
+            assert!(filter.is_some());
+            assert_eq!(order_by.expect("order").column, "id");
+            assert_eq!(limit, Some(4));
+        }
+        _ => panic!("Expected Select"),
+    }
+}
+
+
