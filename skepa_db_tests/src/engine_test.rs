@@ -1745,3 +1745,66 @@ fn test_unique_composite_allows_multiple_rows_with_null_member() {
     assert_eq!(db.execute("select * from t").unwrap(), "a\tb\n1\tnull\n1\tnull");
 }
 
+#[test]
+fn test_foreign_key_on_delete_cascade_propagates_to_grandchildren() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute(
+        "create table c (id int primary key, pid int, foreign key(pid) references p(id) on delete cascade)",
+    )
+    .unwrap();
+    db.execute(
+        "create table g (id int, cid int, foreign key(cid) references c(id) on delete cascade)",
+    )
+    .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (10, 1)").unwrap();
+    db.execute("insert into g values (100, 10)").unwrap();
+
+    db.execute("delete from p where id = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid");
+    assert_eq!(db.execute("select * from g").unwrap(), "id\tcid");
+}
+
+#[test]
+fn test_foreign_key_on_delete_set_null_then_child_cascade_propagates() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute(
+        "create table c (id int primary key, pid int, foreign key(pid) references p(id) on delete set null)",
+    )
+    .unwrap();
+    db.execute(
+        "create table g (id int, cid int, foreign key(cid) references c(id) on delete cascade)",
+    )
+    .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (10, 1)").unwrap();
+    db.execute("insert into g values (100, 10)").unwrap();
+
+    db.execute("delete from p where id = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\tnull");
+    assert_eq!(db.execute("select * from g").unwrap(), "id\tcid\n100\t10");
+}
+
+#[test]
+fn test_foreign_key_on_update_cascade_propagates_to_grandchildren() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute(
+        "create table c (id int primary key, foreign key(id) references p(id) on update cascade)",
+    )
+    .unwrap();
+    db.execute(
+        "create table g (id int, cid int, foreign key(cid) references c(id) on update cascade)",
+    )
+    .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1)").unwrap();
+    db.execute("insert into g values (100, 1)").unwrap();
+
+    db.execute("update p set id = 2 where id = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\n2");
+    assert_eq!(db.execute("select * from g").unwrap(), "id\tcid\n100\t2");
+}
+

@@ -726,6 +726,7 @@ fn apply_on_delete_cascade(
 
         let mut keep_rows: Vec<Row> = Vec::new();
         let mut keep_old_indices: Vec<usize> = Vec::new();
+        let mut deleted_child_rows: Vec<Row> = Vec::new();
         for (idx, cr) in child_rows.iter().enumerate() {
             let referenced = deleted_parent_rows
                 .iter()
@@ -733,10 +734,14 @@ fn apply_on_delete_cascade(
             if !referenced {
                 keep_rows.push(cr.clone());
                 keep_old_indices.push(idx);
+            } else {
+                validate_restrict_on_parent_delete(catalog, storage, &child_table, child_schema, cr)?;
+                deleted_child_rows.push(cr.clone());
             }
         }
         storage.replace_rows_with_alignment(&child_table, keep_rows, keep_old_indices)?;
         storage.rebuild_indexes(&child_table, child_schema)?;
+        apply_on_delete_cascade(catalog, storage, &child_table, child_schema, &deleted_child_rows)?;
     }
     Ok(())
 }
@@ -805,10 +810,11 @@ fn apply_on_update_cascade(
         }
         let child_schema = catalog.schema(&child_table)?;
         let child_rows = storage.scan(&child_table)?;
+        let old_child_rows = child_rows.to_vec();
         let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
         let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
 
-        let mut updated_child_rows = child_rows.to_vec();
+        let mut updated_child_rows = old_child_rows.clone();
         for cr in &mut updated_child_rows {
             for (old_pr, new_pr) in old_parent_rows.iter().zip(new_parent_rows.iter()) {
                 if tuple_eq(cr, &child_idxs, old_pr, &parent_idxs)
@@ -825,6 +831,15 @@ fn apply_on_update_cascade(
         validate_all_foreign_keys(catalog, storage, child_schema, &updated_child_rows)?;
         let keep_old_indices: Vec<usize> = (0..updated_child_rows.len()).collect();
         storage.replace_rows_with_alignment(&child_table, updated_child_rows, keep_old_indices)?;
+        let post_child_rows = storage.scan(&child_table)?.to_vec();
+        apply_on_update_cascade(
+            catalog,
+            storage,
+            &child_table,
+            child_schema,
+            &old_child_rows,
+            &post_child_rows,
+        )?;
         storage.rebuild_indexes(&child_table, child_schema)?;
     }
     Ok(())
