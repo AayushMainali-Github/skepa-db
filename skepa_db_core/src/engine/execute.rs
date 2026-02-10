@@ -882,6 +882,8 @@ fn resolve_cols(schema: &Schema, names: &[String]) -> Result<(Vec<usize>, Vec<St
 
 fn matches_where(cell: &Value, dtype: &DataType, op: &CompareOp, rhs_token: &str) -> Result<bool, String> {
     match op {
+        CompareOp::IsNull => Ok(matches!(cell, Value::Null)),
+        CompareOp::IsNotNull => Ok(!matches!(cell, Value::Null)),
         CompareOp::Eq => {
             let rhs = parse_value(dtype, rhs_token)?;
             Ok(cell == &rhs)

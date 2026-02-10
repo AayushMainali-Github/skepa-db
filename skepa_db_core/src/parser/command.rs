@@ -8,6 +8,8 @@ pub enum CompareOp {
     Gte,
     Lte,
     Like,
+    IsNull,
+    IsNotNull,
 }
 
 #[derive(Debug, Clone, PartialEq)]

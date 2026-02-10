@@ -577,6 +577,51 @@ fn test_select_left_join_order_limit() {
 }
 
 #[test]
+fn test_select_where_is_null_and_is_not_null() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+    db.execute("insert into users values (2, null)").unwrap();
+
+    let out_null = db.execute("select id from users where city is null order by id asc").unwrap();
+    assert_eq!(out_null, "id\n2");
+
+    let out_not_null = db
+        .execute("select id from users where city is not null order by id asc")
+        .unwrap();
+    assert_eq!(out_not_null, "id\n1");
+}
+
+#[test]
+fn test_update_where_is_null() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute("insert into users values (1, null)").unwrap();
+    db.execute(r#"insert into users values (2, "la")"#).unwrap();
+
+    let msg = db
+        .execute(r#"update users set city = "ny" where city is null"#)
+        .unwrap();
+    assert_eq!(msg, "updated 1 row(s) in users");
+    let out = db.execute("select * from users order by id asc").unwrap();
+    assert_eq!(out, "id\tcity\n1\tny\n2\tla");
+}
+
+#[test]
+fn test_delete_where_is_not_null() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute("insert into users values (1, null)").unwrap();
+    db.execute(r#"insert into users values (2, "la")"#).unwrap();
+    db.execute(r#"insert into users values (3, "ny")"#).unwrap();
+
+    let msg = db.execute("delete from users where city is not null").unwrap();
+    assert_eq!(msg, "deleted 2 row(s) from users");
+    let out = db.execute("select * from users").unwrap();
+    assert_eq!(out, "id\tcity\n1\tnull");
+}
+
+#[test]
 fn test_update_unknown_set_column_errors() {
     let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();

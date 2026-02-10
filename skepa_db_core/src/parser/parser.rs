@@ -489,16 +489,7 @@ fn parse_update(tokens: &[String]) -> Result<Command, String> {
     }
 
     let where_tokens = &tokens[where_idx + 1..];
-    if where_tokens.len() != 3 {
-        return Err("Bad UPDATE WHERE clause. Use: where <column> <op> <value>".to_string());
-    }
-
-    let op = parse_compare_op(&where_tokens[1])?;
-    let filter = WhereClause {
-        column: where_tokens[0].clone(),
-        op,
-        value: where_tokens[2].clone(),
-    };
+    let filter = parse_where_clause(where_tokens, "Bad UPDATE WHERE clause. Use: where <column> <op> <value> or where <column> is [not] null")?;
 
     Ok(Command::Update {
         table,
@@ -509,21 +500,20 @@ fn parse_update(tokens: &[String]) -> Result<Command, String> {
 
 fn parse_delete(tokens: &[String]) -> Result<Command, String> {
     // delete from <table> where <column> <op> <value>
-    if tokens.len() != 7
+    if tokens.len() < 7
         || !tokens[1].eq_ignore_ascii_case("from")
         || !tokens[3].eq_ignore_ascii_case("where")
     {
-        return Err("Usage: delete from <table> where <column> <op> <value>".to_string());
+        return Err("Usage: delete from <table> where <column> <op> <value> or where <column> is [not] null".to_string());
     }
 
-    let op = parse_compare_op(&tokens[5])?;
+    let filter = parse_where_clause(
+        &tokens[4..],
+        "Usage: delete from <table> where <column> <op> <value> or where <column> is [not] null",
+    )?;
     Ok(Command::Delete {
         table: tokens[2].clone(),
-        filter: WhereClause {
-            column: tokens[4].clone(),
-            op,
-            value: tokens[6].clone(),
-        },
+        filter,
     })
 }
 
@@ -586,18 +576,17 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     }
 
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("where") {
-        if i + 3 >= tokens.len() {
+        if i + 2 >= tokens.len() {
             return Err(
                 "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
             );
         }
-        let op = parse_compare_op(&tokens[i + 2])?;
-        filter = Some(WhereClause {
-            column: tokens[i + 1].clone(),
-            op,
-            value: tokens[i + 3].clone(),
-        });
-        i += 4;
+        let where_end = find_where_end(tokens, i + 1)?;
+        filter = Some(parse_where_clause(
+            &tokens[i + 1..where_end],
+            "Usage: select <col1,col2|*> from <table> [where <column> <op> <value> or <column> is [not] null] [order by <column> [asc|desc]] [limit <n>]",
+        )?);
+        i = where_end;
     }
 
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("order") {
@@ -694,6 +683,47 @@ fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
             "Unknown WHERE operator '{raw}'. Use =|eq|>|gt|<|lt|>=|gte|<=|lte|like"
         )),
     }
+}
+
+fn parse_where_clause(tokens: &[String], usage_msg: &str) -> Result<WhereClause, String> {
+    if tokens.len() == 3 && tokens[1].eq_ignore_ascii_case("is") && tokens[2].eq_ignore_ascii_case("null") {
+        return Ok(WhereClause {
+            column: tokens[0].clone(),
+            op: CompareOp::IsNull,
+            value: String::new(),
+        });
+    }
+    if tokens.len() == 4
+        && tokens[1].eq_ignore_ascii_case("is")
+        && tokens[2].eq_ignore_ascii_case("not")
+        && tokens[3].eq_ignore_ascii_case("null")
+    {
+        return Ok(WhereClause {
+            column: tokens[0].clone(),
+            op: CompareOp::IsNotNull,
+            value: String::new(),
+        });
+    }
+    if tokens.len() == 3 {
+        let op = parse_compare_op(&tokens[1])?;
+        return Ok(WhereClause {
+            column: tokens[0].clone(),
+            op,
+            value: tokens[2].clone(),
+        });
+    }
+    Err(usage_msg.to_string())
+}
+
+fn find_where_end(tokens: &[String], start: usize) -> Result<usize, String> {
+    let mut i = start;
+    while i < tokens.len() {
+        if tokens[i].eq_ignore_ascii_case("order") || tokens[i].eq_ignore_ascii_case("limit") {
+            return Ok(i);
+        }
+        i += 1;
+    }
+    Ok(tokens.len())
 }
 
 fn parse_datatype_in_create(

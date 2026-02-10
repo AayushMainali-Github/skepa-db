@@ -1427,6 +1427,49 @@ fn parse_select_with_limit_only() {
     }
 }
 
+#[test]
+fn parse_select_where_is_null() {
+    let cmd = parse("select * from users where city is null").unwrap();
+    match cmd {
+        Command::Select { filter, .. } => {
+            let f = filter.expect("where");
+            assert_eq!(f.column, "city");
+            assert_eq!(f.op, CompareOp::IsNull);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_where_is_not_null() {
+    let cmd = parse("select * from users where city is not null").unwrap();
+    match cmd {
+        Command::Select { filter, .. } => {
+            let f = filter.expect("where");
+            assert_eq!(f.op, CompareOp::IsNotNull);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_update_where_is_null() {
+    let cmd = parse("update users set city = \"x\" where city is null").unwrap();
+    match cmd {
+        Command::Update { filter, .. } => assert_eq!(filter.op, CompareOp::IsNull),
+        _ => panic!("Expected Update command"),
+    }
+}
+
+#[test]
+fn parse_delete_where_is_not_null() {
+    let cmd = parse("delete from users where city is not null").unwrap();
+    match cmd {
+        Command::Delete { filter, .. } => assert_eq!(filter.op, CompareOp::IsNotNull),
+        _ => panic!("Expected Delete command"),
+    }
+}
+
 macro_rules! parse_ok_cases {
     ($( $name:ident => $sql:expr ),* $(,)?) => {
         $(
