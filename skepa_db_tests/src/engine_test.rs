@@ -2293,6 +2293,21 @@ fn test_select_order_by_and_limit() {
 }
 
 #[test]
+fn test_select_order_by_multiple_columns() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text, age int)").unwrap();
+    db.execute(r#"insert into users values (1, "ny", 30)"#).unwrap();
+    db.execute(r#"insert into users values (2, "la", 20)"#).unwrap();
+    db.execute(r#"insert into users values (3, "ny", 25)"#).unwrap();
+    db.execute(r#"insert into users values (4, "la", 40)"#).unwrap();
+
+    let out = db
+        .execute("select id,city from users order by city asc, id desc")
+        .unwrap();
+    assert_eq!(out, "id\tcity\n4\tla\n2\tla\n3\tny\n1\tny");
+}
+
+#[test]
 fn test_select_order_by_text_asc() {
     let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();

@@ -598,19 +598,9 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
                 "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
             );
         }
-        let col = tokens[i + 2].clone();
-        i += 3;
-        let mut asc = true;
-        if i < tokens.len() {
-            if tokens[i].eq_ignore_ascii_case("asc") {
-                asc = true;
-                i += 1;
-            } else if tokens[i].eq_ignore_ascii_case("desc") {
-                asc = false;
-                i += 1;
-            }
-        }
-        order_by = Some(OrderBy { column: col, asc });
+        let (ob, next_i) = parse_order_by_list(tokens, i + 2)?;
+        order_by = Some(ob);
+        i = next_i;
     }
 
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("limit") {
@@ -640,6 +630,50 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
         order_by,
         limit,
     })
+}
+
+fn parse_order_by_list(tokens: &[String], mut i: usize) -> Result<(OrderBy, usize), String> {
+    let mut items: Vec<(String, bool)> = Vec::new();
+    loop {
+        if i >= tokens.len() {
+            return Err("ORDER BY requires at least one column".to_string());
+        }
+        let col = tokens[i].clone();
+        i += 1;
+        let mut asc = true;
+        if i < tokens.len() {
+            if tokens[i].eq_ignore_ascii_case("asc") {
+                asc = true;
+                i += 1;
+            } else if tokens[i].eq_ignore_ascii_case("desc") {
+                asc = false;
+                i += 1;
+            }
+        }
+        items.push((col, asc));
+        if i < tokens.len() && tokens[i] == "," {
+            i += 1;
+            continue;
+        }
+        break;
+    }
+    let (first_col, first_asc) = items
+        .first()
+        .cloned()
+        .ok_or_else(|| "ORDER BY requires at least one column".to_string())?;
+    let then_by = if items.len() > 1 {
+        items[1..].to_vec()
+    } else {
+        Vec::new()
+    };
+    Ok((
+        OrderBy {
+            column: first_col,
+            asc: first_asc,
+            then_by,
+        },
+        i,
+    ))
 }
 
 fn parse_select_columns(tokens: &[String]) -> Result<Vec<String>, String> {

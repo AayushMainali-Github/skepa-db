@@ -1428,7 +1428,22 @@ fn parse_select_with_order_by_only() {
     match cmd {
         Command::Select { order_by, limit, .. } => {
             assert_eq!(limit, None);
-            assert_eq!(order_by.expect("order").column, "id");
+            let ob = order_by.expect("order");
+            assert_eq!(ob.column, "id");
+            assert!(ob.then_by.is_empty());
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_with_multi_order_by() {
+    let cmd = parse("select * from users order by city asc, id desc").unwrap();
+    match cmd {
+        Command::Select { order_by, .. } => {
+            let ob = order_by.expect("order");
+            assert_eq!(ob.column, "city");
+            assert_eq!(ob.then_by, vec![("id".to_string(), false)]);
         }
         _ => panic!("Expected Select command"),
     }
@@ -1670,6 +1685,11 @@ parse_err_cases!(
     parse_more_err_19 => "select * from t order by a desc limit none",
     parse_more_err_20 => "select * from t where a = 1 order by a desc limit 1 extra"
 );
+
+#[test]
+fn parse_select_multi_order_by_trailing_comma_errors() {
+    assert!(parse("select * from t order by a,").is_err());
+}
 
 #[test]
 fn parse_more_select_struct_fields_are_populated() {

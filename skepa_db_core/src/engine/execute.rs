@@ -330,8 +330,23 @@ fn handle_select(
 
     let mut ordered_rows = filtered_rows;
     if let Some(ob) = order_by {
-        let idx = resolve_column_index(&select_schema, &ob.column, "ORDER BY")?;
-        ordered_rows.sort_by(|a, b| compare_for_order(a.get(idx), b.get(idx), ob.asc));
+        let mut criteria: Vec<(usize, bool)> = Vec::new();
+        criteria.push((
+            resolve_column_index(&select_schema, &ob.column, "ORDER BY")?,
+            ob.asc,
+        ));
+        for (col, asc) in ob.then_by {
+            criteria.push((resolve_column_index(&select_schema, &col, "ORDER BY")?, asc));
+        }
+        ordered_rows.sort_by(|a, b| {
+            for (idx, asc) in &criteria {
+                let ord = compare_for_order(a.get(*idx), b.get(*idx), *asc);
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+            }
+            Ordering::Equal
+        });
     }
     let limited_rows = if let Some(n) = limit {
         ordered_rows.into_iter().take(n).collect::<Vec<_>>()

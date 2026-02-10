@@ -46,6 +46,7 @@ pub struct Assignment {
 pub struct OrderBy {
     pub column: String,
     pub asc: bool,
+    pub then_by: Vec<(String, bool)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
