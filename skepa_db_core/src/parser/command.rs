@@ -30,7 +30,14 @@ pub struct OrderBy {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum JoinType {
+    Inner,
+    Left,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct JoinClause {
+    pub join_type: JoinType,
     pub table: String,
     pub left_column: String,
     pub right_column: String,

@@ -1,4 +1,4 @@
-use skepa_db_core::parser::command::{Command, CompareOp};
+use skepa_db_core::parser::command::{Command, CompareOp, JoinType};
 use skepa_db_core::parser::parser::parse;
 use skepa_db_core::types::datatype::DataType;
 
@@ -1565,6 +1565,7 @@ fn parse_select_with_inner_join_basic() {
         Command::Select { table, join, columns, .. } => {
             assert_eq!(table, "users");
             let j = join.expect("join");
+            assert_eq!(j.join_type, JoinType::Inner);
             assert_eq!(j.table, "profiles");
             assert_eq!(j.left_column, "users.id");
             assert_eq!(j.right_column, "profiles.user_id");
@@ -1591,6 +1592,24 @@ fn parse_select_with_inner_join_where_order_limit() {
 #[test]
 fn parse_select_join_bad_on_syntax_errors() {
     assert!(parse("select * from users join profiles on users.id profiles.user_id").is_err());
+}
+
+#[test]
+fn parse_select_with_left_join_basic() {
+    let cmd = parse("select * from users left join profiles on users.id = profiles.user_id").unwrap();
+    match cmd {
+        Command::Select { join, .. } => {
+            let j = join.expect("left join");
+            assert_eq!(j.join_type, JoinType::Left);
+            assert_eq!(j.table, "profiles");
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_left_join_requires_join_keyword() {
+    assert!(parse("select * from users left profiles on users.id = profiles.user_id").is_err());
 }
 
 

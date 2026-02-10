@@ -1,6 +1,6 @@
 use crate::parser::command::{
-    AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, OrderBy, TableConstraintDef,
-    WhereClause,
+    AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, JoinType, OrderBy,
+    TableConstraintDef, WhereClause,
 };
 use crate::types::datatype::{DataType, parse_datatype};
 
@@ -557,18 +557,32 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     let mut order_by: Option<OrderBy> = None;
     let mut limit: Option<usize> = None;
 
-    if i < tokens.len() && tokens[i].eq_ignore_ascii_case("join") {
-        if i + 5 >= tokens.len() || !tokens[i + 2].eq_ignore_ascii_case("on") || tokens[i + 4] != "=" {
+    if i < tokens.len() && (tokens[i].eq_ignore_ascii_case("join") || tokens[i].eq_ignore_ascii_case("left")) {
+        let (join_type, join_kw_idx) = if tokens[i].eq_ignore_ascii_case("left") {
+            if i + 1 >= tokens.len() || !tokens[i + 1].eq_ignore_ascii_case("join") {
+                return Err(
+                    "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+                );
+            }
+            (JoinType::Left, i + 1)
+        } else {
+            (JoinType::Inner, i)
+        };
+        if join_kw_idx + 5 >= tokens.len()
+            || !tokens[join_kw_idx + 2].eq_ignore_ascii_case("on")
+            || tokens[join_kw_idx + 4] != "="
+        {
             return Err(
-                "Usage: select <col1,col2|*> from <table> [join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+                "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
             );
         }
         join = Some(JoinClause {
-            table: tokens[i + 1].clone(),
-            left_column: tokens[i + 3].clone(),
-            right_column: tokens[i + 5].clone(),
+            join_type,
+            table: tokens[join_kw_idx + 1].clone(),
+            left_column: tokens[join_kw_idx + 3].clone(),
+            right_column: tokens[join_kw_idx + 5].clone(),
         });
-        i += 6;
+        i = join_kw_idx + 6;
     }
 
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("where") {
@@ -622,7 +636,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
 
     if i != tokens.len() {
         return Err(
-            "Usage: select <col1,col2|*> from <table> [join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
         );
     }
 

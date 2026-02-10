@@ -1,5 +1,5 @@
 use crate::engine::format::format_select;
-use crate::parser::command::{AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, OrderBy, TableConstraintDef, WhereClause};
+use crate::parser::command::{AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, JoinType, OrderBy, TableConstraintDef, WhereClause};
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, value_to_string, Value};
@@ -408,15 +408,21 @@ fn build_join_rows(
     let mut out_rows: Vec<Row> = Vec::new();
     for lr in left_rows {
         let Some(left_key) = lr.get(lidx) else { continue };
-        if matches!(left_key, Value::Null) {
-            continue;
-        }
-        if let Some(matching_right_rows) = right_key_to_rows.get(&value_to_string(left_key)) {
+        let matching = if matches!(left_key, Value::Null) {
+            None
+        } else {
+            right_key_to_rows.get(&value_to_string(left_key))
+        };
+        if let Some(matching_right_rows) = matching {
             for rr in matching_right_rows {
                 let mut row = lr.clone();
                 row.extend(rr.clone());
                 out_rows.push(row);
             }
+        } else if join.join_type == JoinType::Left {
+            let mut row = lr.clone();
+            row.extend(std::iter::repeat(Value::Null).take(right_schema.columns.len()));
+            out_rows.push(row);
         }
     }
 

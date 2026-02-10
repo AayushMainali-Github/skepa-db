@@ -511,6 +511,72 @@ fn test_select_inner_join_many_to_one_returns_all_matches() {
 }
 
 #[test]
+fn test_select_left_join_includes_unmatched_left_rows() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text)").unwrap();
+    db.execute("create table profiles (user_id int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    db.execute(r#"insert into users values (2, "avi")"#).unwrap();
+    db.execute(r#"insert into users values (3, "sam")"#).unwrap();
+    db.execute(r#"insert into profiles values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into profiles values (2, "la")"#).unwrap();
+
+    let out = db
+        .execute("select users.id,profiles.city from users left join profiles on users.id = profiles.user_id order by users.id asc")
+        .unwrap();
+    assert_eq!(out, "users.id\tprofiles.city\n1\tny\n2\tla\n3\tnull");
+}
+
+#[test]
+fn test_select_left_join_where_on_right_column_filters_null_rows_out() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text)").unwrap();
+    db.execute("create table profiles (user_id int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    db.execute(r#"insert into users values (2, "avi")"#).unwrap();
+    db.execute(r#"insert into users values (3, "sam")"#).unwrap();
+    db.execute(r#"insert into profiles values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into profiles values (2, "la")"#).unwrap();
+
+    let out = db
+        .execute(r#"select users.id from users left join profiles on users.id = profiles.user_id where profiles.city = "ny" order by users.id asc"#)
+        .unwrap();
+    assert_eq!(out, "users.id\n1");
+}
+
+#[test]
+fn test_select_left_join_with_null_left_key_still_included() {
+    let mut db = test_db();
+    db.execute("create table a (id int, name text)").unwrap();
+    db.execute("create table b (id int, city text)").unwrap();
+    db.execute(r#"insert into a values (null, "ram")"#).unwrap();
+    db.execute(r#"insert into a values (1, "avi")"#).unwrap();
+    db.execute(r#"insert into b values (1, "ny")"#).unwrap();
+
+    let out = db
+        .execute("select a.name,b.city from a left join b on a.id = b.id order by a.name asc")
+        .unwrap();
+    assert_eq!(out, "a.name\tb.city\navi\tny\nram\tnull");
+}
+
+#[test]
+fn test_select_left_join_order_limit() {
+    let mut db = test_db();
+    db.execute("create table a (id int)").unwrap();
+    db.execute("create table b (id int, v text)").unwrap();
+    db.execute("insert into a values (1)").unwrap();
+    db.execute("insert into a values (2)").unwrap();
+    db.execute("insert into a values (3)").unwrap();
+    db.execute(r#"insert into b values (1, "x")"#).unwrap();
+    db.execute(r#"insert into b values (2, "y")"#).unwrap();
+
+    let out = db
+        .execute("select a.id,b.v from a left join b on a.id = b.id order by a.id desc limit 2")
+        .unwrap();
+    assert_eq!(out, "a.id\tb.v\n3\tnull\n2\ty");
+}
+
+#[test]
 fn test_update_unknown_set_column_errors() {
     let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
