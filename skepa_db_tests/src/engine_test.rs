@@ -1845,6 +1845,32 @@ fn test_secondary_index_select_update_delete_eq_paths() {
 }
 
 #[test]
+fn test_select_order_by_and_limit() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text, age int)").unwrap();
+    db.execute(r#"insert into users values (1, "alice", 30)"#).unwrap();
+    db.execute(r#"insert into users values (2, "bob", 20)"#).unwrap();
+    db.execute(r#"insert into users values (3, "charlie", 25)"#).unwrap();
+
+    let out = db
+        .execute("select id,name from users order by age desc limit 2")
+        .unwrap();
+    assert_eq!(out, "id\tname\n1\talice\n3\tcharlie");
+}
+
+#[test]
+fn test_select_order_by_text_asc() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text)").unwrap();
+    db.execute(r#"insert into users values (1, "z")"#).unwrap();
+    db.execute(r#"insert into users values (2, "a")"#).unwrap();
+    db.execute(r#"insert into users values (3, "m")"#).unwrap();
+
+    let out = db.execute("select * from users order by name asc").unwrap();
+    assert_eq!(out, "id\tname\n2\ta\n3\tm\n1\tz");
+}
+
+#[test]
 fn test_index_not_allowed_inside_transaction() {
     let mut db = test_db();
     db.execute("create table users (id int, email text)").unwrap();

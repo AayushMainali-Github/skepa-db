@@ -42,7 +42,7 @@ fn main() {
             println!("  insert into <table> values (<v1>, <v2>, ...)");
             println!("  update <table> set <col> = <value> [, <col> = <value> ...] where <column> <op> <value>");
             println!("  delete from <table> where <column> <op> <value>");
-            println!("  select <col1,col2|*> from <table> [where <column> <op> <value>]");
+            println!("  select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]");
             println!("  where ops: =|eq|>|gt|<|lt|>=|gte|<=|lte|like");
             println!("  like uses '*' and '?' wildcards, e.g. \"ra*\", \"*ir\", \"*av*\", \"r?m\"");
             println!("  exit|quit     -> quit");

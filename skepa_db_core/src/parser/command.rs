@@ -24,6 +24,12 @@ pub struct Assignment {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct OrderBy {
+    pub column: String,
+    pub asc: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ColumnDef {
     pub name: String,
     pub dtype: DataType,
@@ -117,5 +123,7 @@ pub enum Command {
         table: String,
         columns: Option<Vec<String>>,
         filter: Option<WhereClause>,
+        order_by: Option<OrderBy>,
+        limit: Option<usize>,
     },
 }

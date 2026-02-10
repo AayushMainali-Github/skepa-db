@@ -1,5 +1,5 @@
 use crate::parser::command::{
-    AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, TableConstraintDef, WhereClause,
+    AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, OrderBy, TableConstraintDef, WhereClause,
 };
 use crate::types::datatype::{DataType, parse_datatype};
 
@@ -550,34 +550,72 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     }
     let table = tokens[from_idx + 1].clone();
 
-    if from_idx + 2 == tokens.len() {
-        return Ok(Command::Select {
-            table,
-            columns: Some(columns),
-            filter: None,
+    let mut i = from_idx + 2;
+    let mut filter: Option<WhereClause> = None;
+    let mut order_by: Option<OrderBy> = None;
+    let mut limit: Option<usize> = None;
+
+    if i < tokens.len() && tokens[i].eq_ignore_ascii_case("where") {
+        if i + 3 >= tokens.len() {
+            return Err(
+                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            );
+        }
+        let op = parse_compare_op(&tokens[i + 2])?;
+        filter = Some(WhereClause {
+            column: tokens[i + 1].clone(),
+            op,
+            value: tokens[i + 3].clone(),
         });
+        i += 4;
     }
 
-    if from_idx + 5 >= tokens.len() || !tokens[from_idx + 2].eq_ignore_ascii_case("where") {
-        return Err(
-            "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>]".to_string(),
-        );
+    if i < tokens.len() && tokens[i].eq_ignore_ascii_case("order") {
+        if i + 2 >= tokens.len() || !tokens[i + 1].eq_ignore_ascii_case("by") {
+            return Err(
+                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            );
+        }
+        let col = tokens[i + 2].clone();
+        i += 3;
+        let mut asc = true;
+        if i < tokens.len() {
+            if tokens[i].eq_ignore_ascii_case("asc") {
+                asc = true;
+                i += 1;
+            } else if tokens[i].eq_ignore_ascii_case("desc") {
+                asc = false;
+                i += 1;
+            }
+        }
+        order_by = Some(OrderBy { column: col, asc });
     }
-    if from_idx + 6 != tokens.len() {
+
+    if i < tokens.len() && tokens[i].eq_ignore_ascii_case("limit") {
+        if i + 1 >= tokens.len() {
+            return Err(
+                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            );
+        }
+        let n = tokens[i + 1]
+            .parse::<usize>()
+            .map_err(|_| "LIMIT must be a non-negative integer".to_string())?;
+        limit = Some(n);
+        i += 2;
+    }
+
+    if i != tokens.len() {
         return Err(
-            "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>]".to_string(),
+            "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
         );
     }
 
-    let op = parse_compare_op(&tokens[from_idx + 4])?;
     Ok(Command::Select {
         table,
         columns: Some(columns),
-        filter: Some(WhereClause {
-            column: tokens[from_idx + 3].clone(),
-            op,
-            value: tokens[from_idx + 5].clone(),
-        }),
+        filter,
+        order_by,
+        limit,
     })
 }
 

@@ -1,5 +1,5 @@
 use crate::engine::format::format_select;
-use crate::parser::command::{AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, TableConstraintDef, WhereClause};
+use crate::parser::command::{AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, OrderBy, TableConstraintDef, WhereClause};
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, Value};
@@ -35,7 +35,9 @@ pub fn execute_command(
             table,
             columns,
             filter,
-        } => handle_select(table, columns, filter, catalog, storage),
+            order_by,
+            limit,
+        } => handle_select(table, columns, filter, order_by, limit, catalog, storage),
         Command::Begin | Command::Commit | Command::Rollback => {
             Err("Transaction control is handled by Database".to_string())
         }
@@ -266,6 +268,8 @@ fn handle_select(
     table: String,
     columns: Option<Vec<String>>,
     filter: Option<WhereClause>,
+    order_by: Option<OrderBy>,
+    limit: Option<usize>,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
 ) -> Result<String, String> {
@@ -310,8 +314,44 @@ fn handle_select(
         rows.to_vec()
     };
 
-    let (out_schema, out_rows) = project_rows(schema, &filtered_rows, columns.as_ref())?;
+    let mut ordered_rows = filtered_rows;
+    if let Some(ob) = order_by {
+        let idx = schema
+            .columns
+            .iter()
+            .position(|c| c.name == ob.column)
+            .ok_or_else(|| format!("Unknown column '{}' in ORDER BY", ob.column))?;
+        ordered_rows.sort_by(|a, b| compare_for_order(a.get(idx), b.get(idx), ob.asc));
+    }
+    let limited_rows = if let Some(n) = limit {
+        ordered_rows.into_iter().take(n).collect::<Vec<_>>()
+    } else {
+        ordered_rows
+    };
+
+    let (out_schema, out_rows) = project_rows(schema, &limited_rows, columns.as_ref())?;
     Ok(format_select(&out_schema, &out_rows))
+}
+
+fn compare_for_order(a: Option<&Value>, b: Option<&Value>, asc: bool) -> Ordering {
+    let ord = match (a, b) {
+        (Some(Value::Null), Some(Value::Null)) => Ordering::Equal,
+        (Some(Value::Null), _) => Ordering::Less,
+        (_, Some(Value::Null)) => Ordering::Greater,
+        (Some(Value::Bool(x)), Some(Value::Bool(y))) => x.cmp(y),
+        (Some(Value::Int(x)), Some(Value::Int(y))) => x.cmp(y),
+        (Some(Value::BigInt(x)), Some(Value::BigInt(y))) => x.cmp(y),
+        (Some(Value::Decimal(x)), Some(Value::Decimal(y))) => x.cmp(y),
+        (Some(Value::VarChar(x)), Some(Value::VarChar(y))) => x.cmp(y),
+        (Some(Value::Text(x)), Some(Value::Text(y))) => x.cmp(y),
+        (Some(Value::Date(x)), Some(Value::Date(y))) => x.cmp(y),
+        (Some(Value::Timestamp(x)), Some(Value::Timestamp(y))) => x.cmp(y),
+        (Some(Value::Uuid(x)), Some(Value::Uuid(y))) => x.cmp(y),
+        (Some(Value::Json(x)), Some(Value::Json(y))) => x.to_string().cmp(&y.to_string()),
+        (Some(Value::Blob(x)), Some(Value::Blob(y))) => x.cmp(y),
+        _ => Ordering::Equal,
+    };
+    if asc { ord } else { ord.reverse() }
 }
 
 fn handle_update(

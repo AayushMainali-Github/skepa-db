@@ -41,6 +41,7 @@ fn parse_select_basic() {
             table,
             columns,
             filter,
+            ..
         } => {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), Vec::<String>::new());
@@ -59,6 +60,7 @@ fn parse_select_where_eq() {
             table,
             columns,
             filter,
+            ..
         } => {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), Vec::<String>::new());
@@ -163,6 +165,7 @@ fn parse_select_projection_basic() {
             table,
             columns,
             filter,
+            ..
         } => {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), vec!["id".to_string(), "name".to_string()]);
@@ -181,6 +184,7 @@ fn parse_select_projection_with_where() {
             table,
             columns,
             filter,
+            ..
         } => {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), vec!["id".to_string(), "name".to_string()]);
@@ -202,6 +206,7 @@ fn parse_select_star_from_table() {
             table,
             columns,
             filter,
+            ..
         } => {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), Vec::<String>::new());
@@ -1380,5 +1385,44 @@ fn parse_drop_index_basic() {
             assert_eq!(columns, vec!["email"]);
         }
         _ => panic!("Expected DropIndex command"),
+    }
+}
+
+#[test]
+fn parse_select_with_order_by_and_limit() {
+    let cmd = parse("select id,name from users where age gte 18 order by name desc limit 5").unwrap();
+    match cmd {
+        Command::Select { table, columns, filter, order_by, limit } => {
+            assert_eq!(table, "users");
+            assert_eq!(columns.unwrap(), vec!["id", "name"]);
+            let f = filter.expect("where");
+            assert_eq!(f.column, "age");
+            let o = order_by.expect("order by");
+            assert_eq!(o.column, "name");
+            assert!(!o.asc);
+            assert_eq!(limit, Some(5));
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_with_order_by_only() {
+    let cmd = parse("select * from users order by id asc").unwrap();
+    match cmd {
+        Command::Select { order_by, limit, .. } => {
+            assert_eq!(limit, None);
+            assert_eq!(order_by.expect("order").column, "id");
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_with_limit_only() {
+    let cmd = parse("select * from users limit 2").unwrap();
+    match cmd {
+        Command::Select { limit, .. } => assert_eq!(limit, Some(2)),
+        _ => panic!("Expected Select command"),
     }
 }

@@ -63,11 +63,12 @@
 
 ## Select
 - Retrieves all or selected columns.
-- **Syntax**: `select <col1,col2|*> from <table> [where <column> <operator> <value>]`
+- **Syntax**: `select <col1,col2|*> from <table> [where <column> <operator> <value>] [order by <column> [asc|desc]] [limit <n>]`
 - **Examples**:
   - `select * from users`
   - `select id,name from users`
   - `select name from users where age gte 18`
+  - `select id,name from users order by age desc limit 10`
 
 ### WHERE Operators
 - Equality (int/text): `=` or `eq`
