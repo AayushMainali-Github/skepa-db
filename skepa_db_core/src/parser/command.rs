@@ -14,10 +14,17 @@ pub enum CompareOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum LogicalOp {
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct WhereClause {
     pub column: String,
     pub op: CompareOp,
     pub value: String,
+    pub next: Option<(LogicalOp, Box<WhereClause>)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

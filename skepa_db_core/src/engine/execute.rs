@@ -1,5 +1,5 @@
 use crate::engine::format::format_select;
-use crate::parser::command::{AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, JoinType, OrderBy, TableConstraintDef, WhereClause};
+use crate::parser::command::{AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, JoinType, LogicalOp, OrderBy, TableConstraintDef, WhereClause};
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, value_to_string, Value};
@@ -286,6 +286,7 @@ fn handle_select(
 
     let filtered_rows = if let Some(where_clause) = filter {
         if !is_join
+            && where_clause.next.is_none()
             && where_clause.op == CompareOp::Eq
             && select_schema.primary_key.len() == 1
             && select_schema
@@ -301,7 +302,7 @@ fn handle_select(
             } else {
                 Vec::new()
             }
-        } else if !is_join && where_clause.op == CompareOp::Eq {
+        } else if !is_join && where_clause.next.is_none() && where_clause.op == CompareOp::Eq {
             if let Some(row_idx) =
                 storage.lookup_unique_row_index(&table, &select_schema, &where_clause.column, &where_clause.value)?
             {
@@ -539,20 +540,15 @@ fn handle_update(
         compiled.push((idx, parsed));
     }
 
-    let where_idx = schema
-        .columns
-        .iter()
-        .position(|c| c.name == filter.column)
-        .ok_or_else(|| format!("Unknown column '{}' in WHERE", filter.column))?;
-    let where_dtype = &schema.columns[where_idx].dtype;
-    let targeted_row_indices = if filter.op == CompareOp::Eq
+    let _ = resolve_column_index(schema, &filter.column, "WHERE")?;
+    let targeted_row_indices = if filter.next.is_none() && filter.op == CompareOp::Eq
         && schema.primary_key.len() == 1
         && schema.primary_key.first().is_some_and(|pk| pk == &filter.column)
     {
         storage
             .lookup_pk_row_index(&table, schema, &filter.value)?
             .map(|i| vec![i])
-    } else if filter.op == CompareOp::Eq {
+    } else if filter.next.is_none() && filter.op == CompareOp::Eq {
         if let Some(i) = storage.lookup_unique_row_index(&table, schema, &filter.column, &filter.value)? {
             Some(vec![i])
         } else {
@@ -575,10 +571,7 @@ fn handle_update(
                     continue;
                 }
                 let row = &mut new_rows[i];
-                let cell = row
-                    .get(where_idx)
-                    .ok_or_else(|| format!("Row is missing value for column '{}'", filter.column))?;
-                if matches_where(cell, where_dtype, &filter.op, &filter.value)? {
+                if eval_where_row(row, schema, &filter)? {
                     for (idx, new_value) in &compiled {
                         if let Some(slot) = row.get_mut(*idx) {
                             *slot = new_value.clone();
@@ -589,11 +582,7 @@ fn handle_update(
             }
         } else {
             for row in new_rows.iter_mut() {
-                let cell = row
-                    .get(where_idx)
-                    .ok_or_else(|| format!("Row is missing value for column '{}'", filter.column))?;
-
-                if matches_where(cell, where_dtype, &filter.op, &filter.value)? {
+                if eval_where_row(row, schema, &filter)? {
                     for (idx, new_value) in &compiled {
                         if let Some(slot) = row.get_mut(*idx) {
                             *slot = new_value.clone();
@@ -624,20 +613,15 @@ fn handle_delete(
     storage: &mut dyn StorageEngine,
 ) -> Result<String, String> {
     let schema = catalog.schema(&table)?;
-    let where_idx = schema
-        .columns
-        .iter()
-        .position(|c| c.name == filter.column)
-        .ok_or_else(|| format!("Unknown column '{}' in WHERE", filter.column))?;
-    let where_dtype = &schema.columns[where_idx].dtype;
-    let targeted_row_indices = if filter.op == CompareOp::Eq
+    let _ = resolve_column_index(schema, &filter.column, "WHERE")?;
+    let targeted_row_indices = if filter.next.is_none() && filter.op == CompareOp::Eq
         && schema.primary_key.len() == 1
         && schema.primary_key.first().is_some_and(|pk| pk == &filter.column)
     {
         storage
             .lookup_pk_row_index(&table, schema, &filter.value)?
             .map(|i| vec![i])
-    } else if filter.op == CompareOp::Eq {
+    } else if filter.next.is_none() && filter.op == CompareOp::Eq {
         if let Some(i) = storage.lookup_unique_row_index(&table, schema, &filter.column, &filter.value)? {
             Some(vec![i])
         } else {
@@ -662,14 +646,7 @@ fn handle_delete(
                     kept_old_indices.push(idx);
                     continue;
                 }
-                let should_delete = row_matches(
-                    row,
-                    where_idx,
-                    &filter.column,
-                    where_dtype,
-                    &filter.op,
-                    &filter.value,
-                )?;
+                let should_delete = eval_where_row(row, schema, &filter)?;
                 if should_delete {
                     validate_restrict_on_parent_delete(catalog, storage, &table, schema, row)?;
                     deleted += 1;
@@ -682,8 +659,7 @@ fn handle_delete(
         } else {
             let mut keep_flags: Vec<bool> = Vec::with_capacity(rows.len());
             for row in rows.iter() {
-                let should_delete =
-                    row_matches(row, where_idx, &filter.column, where_dtype, &filter.op, &filter.value)?;
+                let should_delete = eval_where_row(row, schema, &filter)?;
                 keep_flags.push(!should_delete);
             }
 
@@ -745,25 +721,46 @@ fn filter_rows(
     rows: &[Row],
     where_clause: &WhereClause,
 ) -> Result<Vec<Row>, String> {
-    let col_idx = resolve_column_index(schema, &where_clause.column, "WHERE")?;
-
-    let col_dtype = &schema.columns[col_idx].dtype;
+    validate_where_columns(schema, where_clause)?;
     let mut filtered: Vec<Row> = Vec::new();
 
     for row in rows {
-        if row_matches(
-            row,
-            col_idx,
-            &where_clause.column,
-            col_dtype,
-            &where_clause.op,
-            &where_clause.value,
-        )? {
+        if eval_where_row(row, schema, where_clause)? {
             filtered.push(row.clone());
         }
     }
 
     Ok(filtered)
+}
+
+fn validate_where_columns(schema: &Schema, clause: &WhereClause) -> Result<(), String> {
+    let _ = resolve_column_index(schema, &clause.column, "WHERE")?;
+    if let Some((_, next)) = &clause.next {
+        validate_where_columns(schema, next)?;
+    }
+    Ok(())
+}
+
+fn eval_where_row(row: &Row, schema: &Schema, clause: &WhereClause) -> Result<bool, String> {
+    let col_idx = resolve_column_index(schema, &clause.column, "WHERE")?;
+    let col_dtype = &schema.columns[col_idx].dtype;
+    let base = row_matches(
+        row,
+        col_idx,
+        &clause.column,
+        col_dtype,
+        &clause.op,
+        &clause.value,
+    )?;
+    if let Some((logic, next)) = &clause.next {
+        let rhs = eval_where_row(row, schema, next)?;
+        Ok(match logic {
+            LogicalOp::And => base && rhs,
+            LogicalOp::Or => base || rhs,
+        })
+    } else {
+        Ok(base)
+    }
 }
 
 fn row_matches(

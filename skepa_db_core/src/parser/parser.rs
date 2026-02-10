@@ -1,6 +1,6 @@
 use crate::parser::command::{
     AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, JoinType, OrderBy,
-    TableConstraintDef, WhereClause,
+    LogicalOp, TableConstraintDef, WhereClause,
 };
 use crate::types::datatype::{DataType, parse_datatype};
 
@@ -687,61 +687,108 @@ fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
 }
 
 fn parse_where_clause(tokens: &[String], usage_msg: &str) -> Result<WhereClause, String> {
-    if tokens.len() == 3 && tokens[1].eq_ignore_ascii_case("is") && tokens[2].eq_ignore_ascii_case("null") {
-        return Ok(WhereClause {
-            column: tokens[0].clone(),
-            op: CompareOp::IsNull,
-            value: String::new(),
-        });
+    let (mut clause, mut idx) = parse_single_predicate(tokens, 0, usage_msg)?;
+    while idx < tokens.len() {
+        let logic = if tokens[idx].eq_ignore_ascii_case("and") {
+            LogicalOp::And
+        } else if tokens[idx].eq_ignore_ascii_case("or") {
+            LogicalOp::Or
+        } else {
+            return Err(usage_msg.to_string());
+        };
+        let (rhs, next_idx) = parse_single_predicate(tokens, idx + 1, usage_msg)?;
+        clause.next = Some((logic, Box::new(rhs)));
+        idx = next_idx;
     }
-    if tokens.len() == 4
-        && tokens[1].eq_ignore_ascii_case("is")
-        && tokens[2].eq_ignore_ascii_case("not")
-        && tokens[3].eq_ignore_ascii_case("null")
+    Ok(clause)
+}
+
+fn parse_single_predicate(
+    tokens: &[String],
+    start: usize,
+    usage_msg: &str,
+) -> Result<(WhereClause, usize), String> {
+    if start >= tokens.len() {
+        return Err(usage_msg.to_string());
+    }
+    if start + 2 < tokens.len()
+        && tokens[start + 1].eq_ignore_ascii_case("is")
+        && tokens[start + 2].eq_ignore_ascii_case("null")
     {
-        return Ok(WhereClause {
-            column: tokens[0].clone(),
-            op: CompareOp::IsNotNull,
-            value: String::new(),
-        });
+        return Ok((
+            WhereClause {
+                column: tokens[start].clone(),
+                op: CompareOp::IsNull,
+                value: String::new(),
+                next: None,
+            },
+            start + 3,
+        ));
     }
-    if tokens.len() >= 5 && tokens[1].eq_ignore_ascii_case("in") {
-        if tokens[2] != "(" || tokens[tokens.len() - 1] != ")" {
+    if start + 3 < tokens.len()
+        && tokens[start + 1].eq_ignore_ascii_case("is")
+        && tokens[start + 2].eq_ignore_ascii_case("not")
+        && tokens[start + 3].eq_ignore_ascii_case("null")
+    {
+        return Ok((
+            WhereClause {
+                column: tokens[start].clone(),
+                op: CompareOp::IsNotNull,
+                value: String::new(),
+                next: None,
+            },
+            start + 4,
+        ));
+    }
+    if start + 4 < tokens.len() && tokens[start + 1].eq_ignore_ascii_case("in") {
+        if tokens[start + 2] != "(" {
             return Err(usage_msg.to_string());
         }
         let mut vals: Vec<String> = Vec::new();
-        let mut i = 3usize;
-        let end = tokens.len() - 1;
-        while i < end {
+        let mut i = start + 3;
+        while i < tokens.len() {
+            if tokens[i] == ")" {
+                if vals.is_empty() {
+                    return Err(usage_msg.to_string());
+                }
+                return Ok((
+                    WhereClause {
+                        column: tokens[start].clone(),
+                        op: CompareOp::In,
+                        value: vals.join("\u{1F}"),
+                        next: None,
+                    },
+                    i + 1,
+                ));
+            }
             vals.push(tokens[i].clone());
             i += 1;
-            if i < end {
+            if i < tokens.len() {
+                if tokens[i] == ")" {
+                    continue;
+                }
                 if tokens[i] != "," {
                     return Err(usage_msg.to_string());
                 }
                 i += 1;
-                if i >= end {
+                if i >= tokens.len() || tokens[i] == ")" {
                     return Err(usage_msg.to_string());
                 }
             }
         }
-        if vals.is_empty() {
-            return Err(usage_msg.to_string());
-        }
-        return Ok(WhereClause {
-            column: tokens[0].clone(),
-            op: CompareOp::In,
-            value: vals.join("\u{1F}"),
-        });
+        return Err(usage_msg.to_string());
     }
-
-    if tokens.len() == 3 {
-        let op = parse_compare_op(&tokens[1])?;
-        return Ok(WhereClause {
-            column: tokens[0].clone(),
-            op,
-            value: tokens[2].clone(),
-        });
+    if start + 2 < tokens.len() {
+        let op = parse_compare_op(&tokens[start + 1])?;
+        return Ok((
+            WhereClause {
+                column: tokens[start].clone(),
+                op,
+                value: tokens[start + 2].clone(),
+                next: None,
+            },
+            start + 3,
+        ));
     }
     Err(usage_msg.to_string())
 }

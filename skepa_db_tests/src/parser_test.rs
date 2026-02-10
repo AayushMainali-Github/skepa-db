@@ -1508,6 +1508,28 @@ fn parse_select_where_in_invalid_syntax_errors() {
     assert!(parse("select * from users where id in (1,)").is_err());
 }
 
+#[test]
+fn parse_select_where_and_chain() {
+    let cmd = parse("select * from users where age gt 18 and city = \"ny\"").unwrap();
+    match cmd {
+        Command::Select { filter, .. } => {
+            let f = filter.expect("where");
+            assert_eq!(f.column, "age");
+            assert!(f.next.is_some());
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_where_or_chain() {
+    let cmd = parse("select * from users where city = \"ny\" or city = \"la\"").unwrap();
+    match cmd {
+        Command::Select { filter, .. } => assert!(filter.expect("where").next.is_some()),
+        _ => panic!("Expected Select command"),
+    }
+}
+
 macro_rules! parse_ok_cases {
     ($( $name:ident => $sql:expr ),* $(,)?) => {
         $(

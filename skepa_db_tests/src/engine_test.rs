@@ -682,6 +682,57 @@ fn test_where_in_type_mismatch_errors() {
 }
 
 #[test]
+fn test_select_where_and_or() {
+    let mut db = test_db();
+    db.execute("create table users (id int, age int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, 20, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (2, 17, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (3, 19, "la")"#).unwrap();
+    db.execute(r#"insert into users values (4, 22, "sf")"#).unwrap();
+
+    let and_out = db
+        .execute(r#"select id from users where age gte 18 and city = "ny" order by id asc"#)
+        .unwrap();
+    assert_eq!(and_out, "id\n1");
+
+    let or_out = db
+        .execute(r#"select id from users where city = "la" or city = "sf" order by id asc"#)
+        .unwrap();
+    assert_eq!(or_out, "id\n3\n4");
+}
+
+#[test]
+fn test_update_where_and() {
+    let mut db = test_db();
+    db.execute("create table users (id int, age int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, 20, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (2, 20, "la")"#).unwrap();
+
+    let msg = db
+        .execute(r#"update users set city = "x" where age = 20 and city = "ny""#)
+        .unwrap();
+    assert_eq!(msg, "updated 1 row(s) in users");
+    let out = db.execute("select * from users order by id asc").unwrap();
+    assert_eq!(out, "id\tage\tcity\n1\t20\tx\n2\t20\tla");
+}
+
+#[test]
+fn test_delete_where_or() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (2, "la")"#).unwrap();
+    db.execute(r#"insert into users values (3, "sf")"#).unwrap();
+
+    let msg = db
+        .execute(r#"delete from users where city = "ny" or city = "sf""#)
+        .unwrap();
+    assert_eq!(msg, "deleted 2 row(s) from users");
+    let out = db.execute("select * from users").unwrap();
+    assert_eq!(out, "id\tcity\n2\tla");
+}
+
+#[test]
 fn test_update_unknown_set_column_errors() {
     let mut db = test_db();
     db.execute("create table users (id int, name text)").unwrap();
