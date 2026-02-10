@@ -231,8 +231,9 @@ fn handle_update(
         validate_restrict_on_parent_update(catalog, storage, &table, schema, &old_rows, &new_rows)?;
         (updated, new_rows, old_indices, old_rows)
     };
-    let _ = old_rows;
     storage.replace_rows_with_alignment(&table, new_rows, old_indices)?;
+    let post_parent_rows = storage.scan(&table)?.to_vec();
+    apply_on_update_cascade(catalog, storage, &table, schema, &old_rows, &post_parent_rows)?;
     storage.rebuild_indexes(&table, schema)?;
 
     Ok(format!("updated {} row(s) in {}", updated, table))
@@ -659,6 +660,9 @@ fn validate_restrict_on_parent_update(
             continue;
         }
         for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
+            if fk.on_update != ForeignKeyAction::Restrict {
+                continue;
+            }
             let child_schema = catalog.schema(&child_table)?;
             let child_rows = storage.scan(&child_table)?;
             let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
@@ -720,6 +724,48 @@ fn apply_on_delete_cascade(
             }
         }
         storage.replace_rows_with_alignment(&child_table, keep_rows, keep_old_indices)?;
+        storage.rebuild_indexes(&child_table, child_schema)?;
+    }
+    Ok(())
+}
+
+fn apply_on_update_cascade(
+    catalog: &Catalog,
+    storage: &mut dyn StorageEngine,
+    parent_table: &str,
+    parent_schema: &Schema,
+    old_parent_rows: &[Row],
+    new_parent_rows: &[Row],
+) -> Result<(), String> {
+    if old_parent_rows.len() != new_parent_rows.len() {
+        return Err("Internal error: parent row alignment mismatch during ON UPDATE CASCADE".to_string());
+    }
+    for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
+        if fk.on_update != ForeignKeyAction::Cascade {
+            continue;
+        }
+        let child_schema = catalog.schema(&child_table)?;
+        let child_rows = storage.scan(&child_table)?;
+        let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
+        let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
+
+        let mut updated_child_rows = child_rows.to_vec();
+        for cr in &mut updated_child_rows {
+            for (old_pr, new_pr) in old_parent_rows.iter().zip(new_parent_rows.iter()) {
+                if tuple_eq(cr, &child_idxs, old_pr, &parent_idxs)
+                    && !tuple_eq(old_pr, &parent_idxs, new_pr, &parent_idxs)
+                {
+                    for (ci, pi) in child_idxs.iter().zip(parent_idxs.iter()) {
+                        cr[*ci] = new_pr[*pi].clone();
+                    }
+                }
+            }
+        }
+
+        validate_all_unique_constraints(child_schema, &updated_child_rows)?;
+        validate_all_foreign_keys(catalog, storage, child_schema, &updated_child_rows)?;
+        let keep_old_indices: Vec<usize> = (0..updated_child_rows.len()).collect();
+        storage.replace_rows_with_alignment(&child_table, updated_child_rows, keep_old_indices)?;
         storage.rebuild_indexes(&child_table, child_schema)?;
     }
     Ok(())

@@ -7,6 +7,7 @@ pub struct ForeignKeyDef {
     pub ref_table: String,
     pub ref_columns: Vec<String>,
     pub on_delete: ForeignKeyAction,
+    pub on_update: ForeignKeyAction,
 }
 
 /// Represents a single column in a table schema

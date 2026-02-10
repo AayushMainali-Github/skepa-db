@@ -41,6 +41,7 @@ pub enum TableConstraintDef {
         ref_table: String,
         ref_columns: Vec<String>,
         on_delete: ForeignKeyAction,
+        on_update: ForeignKeyAction,
     },
 }
 

@@ -30,7 +30,7 @@ fn main() {
             println!("Commands:");
             println!("  parse <cmd>   -> show parsed Command (debug)");
             println!("  begin | commit | rollback");
-            println!("  create table <table> (<col> <type> [primary key|unique|not null], ..., [primary key(<col,...>)], [unique(<col,...>)], [foreign key(<col,...>) references <table>(<col,...>) [on delete restrict|cascade]])");
+            println!("  create table <table> (<col> <type> [primary key|unique|not null], ..., [primary key(<col,...>)], [unique(<col,...>)], [foreign key(<col,...>) references <table>(<col,...>) [on delete restrict|cascade] [on update restrict|cascade]])");
             println!("  insert into <table> values (<v1>, <v2>, ...)");
             println!("  update <table> set <col> = <value> [, <col> = <value> ...] where <column> <op> <value>");
             println!("  delete from <table> where <column> <op> <value>");

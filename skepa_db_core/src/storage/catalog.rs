@@ -48,9 +48,15 @@ struct ForeignKeyFile {
     ref_columns: Vec<String>,
     #[serde(default = "default_on_delete")]
     on_delete: String,
+    #[serde(default = "default_on_update")]
+    on_update: String,
 }
 
 fn default_on_delete() -> String {
+    "restrict".to_string()
+}
+
+fn default_on_update() -> String {
     "restrict".to_string()
 }
 
@@ -123,12 +129,14 @@ impl Catalog {
                     ref_table,
                     ref_columns,
                     on_delete,
+                    on_update,
                 } => {
                     foreign_keys.push(ForeignKeyDef {
                         columns,
                         ref_table,
                         ref_columns,
                         on_delete,
+                        on_update,
                     });
                 }
             }
@@ -277,6 +285,10 @@ impl Catalog {
                                 ForeignKeyAction::Restrict => "restrict".to_string(),
                                 ForeignKeyAction::Cascade => "cascade".to_string(),
                             },
+                            on_update: match fk.on_update {
+                                ForeignKeyAction::Restrict => "restrict".to_string(),
+                                ForeignKeyAction::Cascade => "cascade".to_string(),
+                            },
                         })
                         .collect(),
                 },
@@ -332,6 +344,10 @@ impl Catalog {
                             ref_table: fk.ref_table,
                             ref_columns: fk.ref_columns,
                             on_delete: match fk.on_delete.to_lowercase().as_str() {
+                                "cascade" => ForeignKeyAction::Cascade,
+                                _ => ForeignKeyAction::Restrict,
+                            },
+                            on_update: match fk.on_update.to_lowercase().as_str() {
                                 "cascade" => ForeignKeyAction::Cascade,
                                 _ => ForeignKeyAction::Restrict,
                             },

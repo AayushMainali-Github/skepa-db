@@ -1089,6 +1089,37 @@ fn parse_two_foreign_keys_in_one_table() {
 }
 
 #[test]
+fn parse_foreign_key_on_update_cascade() {
+    let cmd = parse(
+        "create table c (a int, foreign key(a) references p(id) on update cascade)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_foreign_key_on_update_restrict() {
+    let cmd = parse(
+        "create table c (a int, foreign key(a) references p(id) on update restrict)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_foreign_key_unknown_on_update_action_errors() {
+    let err = parse("create table c (a int, foreign key(a) references p(id) on update setnull)")
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("unknown on update action"));
+}
+
+#[test]
 fn parse_foreign_key_composite_with_spaces() {
     let cmd = parse(
         "create table c (a int, b int, foreign key ( a , b ) references p ( x , y ) on delete cascade)",

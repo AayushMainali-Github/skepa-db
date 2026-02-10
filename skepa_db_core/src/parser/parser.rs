@@ -551,20 +551,42 @@ fn parse_table_constraint_in_create(
         let ref_table = tokens[after_cols + 1].clone();
         let (ref_cols, mut next) = parse_column_name_list(tokens, after_cols + 2, end)?;
         let mut on_delete = ForeignKeyAction::Restrict;
-        if next + 2 < end
-            && tokens[next].eq_ignore_ascii_case("on")
-            && tokens[next + 1].eq_ignore_ascii_case("delete")
-        {
-            on_delete = match tokens[next + 2].to_lowercase().as_str() {
-                "restrict" => ForeignKeyAction::Restrict,
-                "cascade" => ForeignKeyAction::Cascade,
-                other => {
-                    return Err(format!(
-                        "Unknown ON DELETE action '{other}'. Use restrict|cascade"
-                    ))
-                }
-            };
-            next += 3;
+        let mut on_update = ForeignKeyAction::Restrict;
+
+        loop {
+            if next + 2 < end
+                && tokens[next].eq_ignore_ascii_case("on")
+                && tokens[next + 1].eq_ignore_ascii_case("delete")
+            {
+                on_delete = match tokens[next + 2].to_lowercase().as_str() {
+                    "restrict" => ForeignKeyAction::Restrict,
+                    "cascade" => ForeignKeyAction::Cascade,
+                    other => {
+                        return Err(format!(
+                            "Unknown ON DELETE action '{other}'. Use restrict|cascade"
+                        ))
+                    }
+                };
+                next += 3;
+                continue;
+            }
+            if next + 2 < end
+                && tokens[next].eq_ignore_ascii_case("on")
+                && tokens[next + 1].eq_ignore_ascii_case("update")
+            {
+                on_update = match tokens[next + 2].to_lowercase().as_str() {
+                    "restrict" => ForeignKeyAction::Restrict,
+                    "cascade" => ForeignKeyAction::Cascade,
+                    other => {
+                        return Err(format!(
+                            "Unknown ON UPDATE action '{other}'. Use restrict|cascade"
+                        ))
+                    }
+                };
+                next += 3;
+                continue;
+            }
+            break;
         }
         return Ok((
             TableConstraintDef::ForeignKey {
@@ -572,6 +594,7 @@ fn parse_table_constraint_in_create(
                 ref_table,
                 ref_columns: ref_cols,
                 on_delete,
+                on_update,
             },
             next,
         ));

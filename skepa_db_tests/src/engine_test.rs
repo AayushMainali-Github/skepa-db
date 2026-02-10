@@ -1585,3 +1585,54 @@ fn test_fk_composite_restrict_blocks_parent_delete() {
     assert!(err.to_lowercase().contains("restrict"));
 }
 
+#[test]
+fn test_foreign_key_on_update_restrict_blocks_parent_key_update() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on update restrict)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+    let err = db.execute("update p set id = 2 where id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("restrict"));
+}
+
+#[test]
+fn test_foreign_key_on_update_cascade_updates_child_rows() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on update cascade)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+    db.execute("update p set id = 2 where id = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n1\t2");
+}
+
+#[test]
+fn test_composite_foreign_key_on_update_cascade() {
+    let mut db = test_db();
+    db.execute("create table p (a int, b int, primary key(a,b))").unwrap();
+    db.execute(
+        "create table c (id int, a int, b int, foreign key(a,b) references p(a,b) on update cascade)",
+    )
+    .unwrap();
+    db.execute("insert into p values (1, 2)").unwrap();
+    db.execute("insert into c values (1, 1, 2)").unwrap();
+    db.execute("update p set a = 3 where a = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\ta\tb\n1\t3\t2");
+}
+
+#[test]
+fn test_foreign_key_on_update_cascade_multiple_children_rows() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on update cascade)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+    db.execute("insert into c values (2, 1)").unwrap();
+    db.execute("update p set id = 2 where id = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n1\t2\n2\t2");
+}
+
