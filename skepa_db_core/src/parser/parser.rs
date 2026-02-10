@@ -176,7 +176,10 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
         if i >= end {
             return Err("Bad CREATE column list. Use: (id int, name text)".to_string());
         }
-        if tokens[i].eq_ignore_ascii_case("primary") || tokens[i].eq_ignore_ascii_case("unique") {
+        if tokens[i].eq_ignore_ascii_case("primary")
+            || tokens[i].eq_ignore_ascii_case("unique")
+            || tokens[i].eq_ignore_ascii_case("foreign")
+        {
             let (constraint, next_i) = parse_table_constraint_in_create(tokens, i, end)?;
             table_constraints.push(constraint);
             i = next_i;
@@ -533,6 +536,28 @@ fn parse_table_constraint_in_create(
     if tokens[start].eq_ignore_ascii_case("unique") {
         let (cols, next) = parse_column_name_list(tokens, start + 1, end)?;
         return Ok((TableConstraintDef::Unique(cols), next));
+    }
+    if tokens[start].eq_ignore_ascii_case("foreign") {
+        if start + 1 >= end || !tokens[start + 1].eq_ignore_ascii_case("key") {
+            return Err("Bad FOREIGN KEY constraint. Use foreign key(col) references t(col)".to_string());
+        }
+        let (cols, after_cols) = parse_column_name_list(tokens, start + 2, end)?;
+        if after_cols >= end || !tokens[after_cols].eq_ignore_ascii_case("references") {
+            return Err("Bad FOREIGN KEY constraint. Missing REFERENCES".to_string());
+        }
+        if after_cols + 1 >= end {
+            return Err("Bad FOREIGN KEY constraint. Missing parent table".to_string());
+        }
+        let ref_table = tokens[after_cols + 1].clone();
+        let (ref_cols, next) = parse_column_name_list(tokens, after_cols + 2, end)?;
+        return Ok((
+            TableConstraintDef::ForeignKey {
+                columns: cols,
+                ref_table,
+                ref_columns: ref_cols,
+            },
+            next,
+        ));
     }
     Err("Unknown table constraint".to_string())
 }

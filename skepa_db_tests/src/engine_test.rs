@@ -1330,3 +1330,87 @@ fn test_delete_all_rows_using_like_star_then_insert_again() {
     assert_eq!(db.execute("select * from t").unwrap(), "id\tname\n3\tc");
 }
 
+#[test]
+fn test_foreign_key_insert_requires_parent_row() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key)").unwrap();
+    db.execute(
+        "create table orders (id int, user_id int, foreign key(user_id) references users(id))",
+    )
+    .unwrap();
+    let err = db.execute("insert into orders values (1, 99)").unwrap_err();
+    assert!(err.to_lowercase().contains("foreign key"));
+}
+
+#[test]
+fn test_foreign_key_insert_succeeds_when_parent_exists() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key)").unwrap();
+    db.execute(
+        "create table orders (id int, user_id int, foreign key(user_id) references users(id))",
+    )
+    .unwrap();
+    db.execute("insert into users values (1)").unwrap();
+    db.execute("insert into orders values (1, 1)").unwrap();
+    assert_eq!(db.execute("select * from orders").unwrap(), "id\tuser_id\n1\t1");
+}
+
+#[test]
+fn test_foreign_key_restrict_blocks_parent_delete() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key)").unwrap();
+    db.execute(
+        "create table orders (id int, user_id int, foreign key(user_id) references users(id))",
+    )
+    .unwrap();
+    db.execute("insert into users values (1)").unwrap();
+    db.execute("insert into orders values (1, 1)").unwrap();
+    let err = db.execute("delete from users where id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("foreign key restrict"));
+}
+
+#[test]
+fn test_foreign_key_restrict_blocks_parent_update() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key)").unwrap();
+    db.execute(
+        "create table orders (id int, user_id int, foreign key(user_id) references users(id))",
+    )
+    .unwrap();
+    db.execute("insert into users values (1)").unwrap();
+    db.execute("insert into orders values (1, 1)").unwrap();
+    let err = db.execute("update users set id = 2 where id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("foreign key restrict"));
+}
+
+#[test]
+fn test_foreign_key_update_child_requires_parent() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key)").unwrap();
+    db.execute(
+        "create table orders (id int, user_id int, foreign key(user_id) references users(id))",
+    )
+    .unwrap();
+    db.execute("insert into users values (1)").unwrap();
+    db.execute("insert into orders values (1, 1)").unwrap();
+    let err = db
+        .execute("update orders set user_id = 2 where id = 1")
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("foreign key"));
+}
+
+#[test]
+fn test_composite_foreign_key_enforced() {
+    let mut db = test_db();
+    db.execute("create table parent (a int, b int, primary key(a,b))")
+        .unwrap();
+    db.execute(
+        "create table child (id int, a int, b int, foreign key(a,b) references parent(a,b))",
+    )
+    .unwrap();
+    db.execute("insert into parent values (1, 2)").unwrap();
+    db.execute("insert into child values (1, 1, 2)").unwrap();
+    let err = db.execute("insert into child values (2, 9, 9)").unwrap_err();
+    assert!(err.to_lowercase().contains("foreign key"));
+}
+

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::parser::command::{ColumnDef, TableConstraintDef};
 use crate::types::datatype::DataType;
-use crate::storage::schema::{Schema, Column};
+use crate::storage::schema::{Schema, Column, ForeignKeyDef};
 
 /// Manages table schemas (metadata catalog)
 #[derive(Debug, Clone)]
@@ -37,6 +37,15 @@ struct TableConstraintFile {
     primary_key: Vec<String>,
     #[serde(default)]
     unique: Vec<Vec<String>>,
+    #[serde(default)]
+    foreign_keys: Vec<ForeignKeyFile>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+struct ForeignKeyFile {
+    columns: Vec<String>,
+    ref_table: String,
+    ref_columns: Vec<String>,
 }
 
 impl Catalog {
@@ -66,6 +75,7 @@ impl Catalog {
 
         let mut primary_key: Vec<String> = Vec::new();
         let mut unique_constraints: Vec<Vec<String>> = Vec::new();
+        let mut foreign_keys: Vec<ForeignKeyDef> = Vec::new();
 
         let columns: Vec<Column> = cols
             .into_iter()
@@ -102,6 +112,17 @@ impl Catalog {
                 TableConstraintDef::Unique(cols) => {
                     unique_constraints.push(cols);
                 }
+                TableConstraintDef::ForeignKey {
+                    columns,
+                    ref_table,
+                    ref_columns,
+                } => {
+                    foreign_keys.push(ForeignKeyDef {
+                        columns,
+                        ref_table,
+                        ref_columns,
+                    });
+                }
             }
         }
 
@@ -127,7 +148,51 @@ impl Catalog {
             }
         }
 
-        let mut schema = Schema::with_constraints(columns, primary_key.clone(), unique_constraints.clone());
+        for fk in &foreign_keys {
+            if fk.columns.is_empty() || fk.ref_columns.is_empty() {
+                return Err("FOREIGN KEY column list cannot be empty".to_string());
+            }
+            if fk.columns.len() != fk.ref_columns.len() {
+                return Err("FOREIGN KEY column count must match referenced column count".to_string());
+            }
+            for c in &fk.columns {
+                if columns.iter().all(|col| &col.name != c) {
+                    return Err(format!("FOREIGN KEY references unknown column '{c}'"));
+                }
+            }
+            let parent = self
+                .tables
+                .get(&fk.ref_table)
+                .ok_or_else(|| format!("FOREIGN KEY references unknown table '{}'", fk.ref_table))?;
+            for c in &fk.ref_columns {
+                if parent.columns.iter().all(|col| &col.name != c) {
+                    return Err(format!(
+                        "FOREIGN KEY references unknown parent column '{}.{}'",
+                        fk.ref_table, c
+                    ));
+                }
+            }
+
+            let ref_is_pk = parent.primary_key == fk.ref_columns;
+            let ref_is_unique = parent
+                .unique_constraints
+                .iter()
+                .any(|u| u == &fk.ref_columns);
+            if !(ref_is_pk || ref_is_unique) {
+                return Err(format!(
+                    "FOREIGN KEY reference {}({}) must target PRIMARY KEY or UNIQUE columns",
+                    fk.ref_table,
+                    fk.ref_columns.join(",")
+                ));
+            }
+        }
+
+        let mut schema = Schema::with_constraints(
+            columns,
+            primary_key.clone(),
+            unique_constraints.clone(),
+            foreign_keys.clone(),
+        );
         // PK implies NOT NULL on referenced columns.
         for c in &mut schema.columns {
             if primary_key.iter().any(|pk| pk == &c.name) {
@@ -193,6 +258,15 @@ impl Catalog {
                 TableConstraintFile {
                     primary_key: schema.primary_key.clone(),
                     unique: schema.unique_constraints.clone(),
+                    foreign_keys: schema
+                        .foreign_keys
+                        .iter()
+                        .map(|fk| ForeignKeyFile {
+                            columns: fk.columns.clone(),
+                            ref_table: fk.ref_table.clone(),
+                            ref_columns: fk.ref_columns.clone(),
+                        })
+                        .collect(),
                 },
             );
         }
@@ -235,7 +309,19 @@ impl Catalog {
             let tc = file_constraints.get(&table).cloned().unwrap_or_default();
             tables.insert(
                 table,
-                Schema::with_constraints(columns, tc.primary_key, tc.unique),
+                Schema::with_constraints(
+                    columns,
+                    tc.primary_key,
+                    tc.unique,
+                    tc.foreign_keys
+                        .into_iter()
+                        .map(|fk| ForeignKeyDef {
+                            columns: fk.columns,
+                            ref_table: fk.ref_table,
+                            ref_columns: fk.ref_columns,
+                        })
+                        .collect(),
+                ),
             );
         }
 

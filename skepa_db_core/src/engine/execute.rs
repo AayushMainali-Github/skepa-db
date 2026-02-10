@@ -5,6 +5,7 @@ use crate::types::datatype::DataType;
 use crate::types::value::{parse_value, Value};
 use crate::types::Row;
 use std::cmp::Ordering;
+use crate::storage::schema::ForeignKeyDef;
 
 /// Executes a parsed command against the catalog and storage engine
 pub fn execute_command(
@@ -94,6 +95,7 @@ fn handle_insert(
     }
 
     validate_unique_constraints(schema, rows, &row, None)?;
+    validate_outgoing_foreign_keys(catalog, storage, schema, &row)?;
 
     storage.insert_row(&table, row)?;
     storage.rebuild_indexes(&table, schema)?;
@@ -186,8 +188,9 @@ fn handle_update(
         None
     };
 
-    let (updated, new_rows, old_indices) = {
+    let (updated, new_rows, old_indices, old_rows) = {
         let rows = storage.scan(&table)?;
+        let old_rows = rows.to_vec();
         let mut updated = 0usize;
         let mut new_rows = rows.to_vec();
         let old_indices: Vec<usize> = (0..rows.len()).collect();
@@ -224,8 +227,11 @@ fn handle_update(
         }
 
         validate_all_unique_constraints(schema, &new_rows)?;
-        (updated, new_rows, old_indices)
+        validate_all_foreign_keys(catalog, storage, schema, &new_rows)?;
+        validate_restrict_on_parent_update(catalog, storage, &table, schema, &old_rows, &new_rows)?;
+        (updated, new_rows, old_indices, old_rows)
     };
+    let _ = old_rows;
     storage.replace_rows_with_alignment(&table, new_rows, old_indices)?;
     storage.rebuild_indexes(&table, schema)?;
 
@@ -273,6 +279,7 @@ fn handle_delete(
                     &filter.value,
                 )?;
                 if should_delete {
+                    validate_restrict_on_parent_delete(catalog, storage, &table, schema, &rows[i])?;
                     deleted = 1;
                     for (idx, row) in rows.iter().enumerate() {
                         if idx != i {
@@ -300,6 +307,7 @@ fn handle_delete(
                     kept_rows.push(row);
                     kept_old_indices.push(idx);
                 } else {
+                    validate_restrict_on_parent_delete(catalog, storage, &table, schema, &rows[idx])?;
                     deleted += 1;
                 }
             }
@@ -567,4 +575,127 @@ fn wildcard_match(text: &str, pattern: &str) -> bool {
     }
 
     dp[t_len][p_len]
+}
+
+fn validate_all_foreign_keys(
+    catalog: &Catalog,
+    storage: &dyn StorageEngine,
+    schema: &Schema,
+    rows: &[Row],
+) -> Result<(), String> {
+    for r in rows {
+        validate_outgoing_foreign_keys(catalog, storage, schema, r)?;
+    }
+    Ok(())
+}
+
+fn validate_outgoing_foreign_keys(
+    catalog: &Catalog,
+    storage: &dyn StorageEngine,
+    schema: &Schema,
+    row: &Row,
+) -> Result<(), String> {
+    for fk in &schema.foreign_keys {
+        let parent_schema = catalog.schema(&fk.ref_table)?;
+        let parent_rows = storage.scan(&fk.ref_table)?;
+        let child_idxs = resolve_cols_to_idxs(schema, &fk.columns)?;
+        let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
+        let found = parent_rows.iter().any(|pr| tuple_eq(row, &child_idxs, pr, &parent_idxs));
+        if !found {
+            return Err(format!(
+                "FOREIGN KEY violation on ({}) references {}({})",
+                fk.columns.join(","),
+                fk.ref_table,
+                fk.ref_columns.join(",")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_restrict_on_parent_delete(
+    catalog: &Catalog,
+    storage: &dyn StorageEngine,
+    parent_table: &str,
+    parent_schema: &Schema,
+    parent_row: &Row,
+) -> Result<(), String> {
+    for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
+        let child_schema = catalog.schema(&child_table)?;
+        let child_rows = storage.scan(&child_table)?;
+        let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
+        let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
+        if child_rows
+            .iter()
+            .any(|cr| tuple_eq(cr, &child_idxs, parent_row, &parent_idxs))
+        {
+            return Err(format!(
+                "FOREIGN KEY RESTRICT violation: '{}' is referenced by '{}'",
+                parent_table, child_table
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_restrict_on_parent_update(
+    catalog: &Catalog,
+    storage: &dyn StorageEngine,
+    parent_table: &str,
+    parent_schema: &Schema,
+    old_rows: &[Row],
+    new_rows: &[Row],
+) -> Result<(), String> {
+    for (old_r, new_r) in old_rows.iter().zip(new_rows.iter()) {
+        if old_r == new_r {
+            continue;
+        }
+        for (child_table, fk) in incoming_foreign_keys(catalog, parent_table) {
+            let child_schema = catalog.schema(&child_table)?;
+            let child_rows = storage.scan(&child_table)?;
+            let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
+            let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
+            let was_referenced = child_rows
+                .iter()
+                .any(|cr| tuple_eq(cr, &child_idxs, old_r, &parent_idxs));
+            if was_referenced && !tuple_eq(old_r, &parent_idxs, new_r, &parent_idxs) {
+                return Err(format!(
+                    "FOREIGN KEY RESTRICT violation: '{}' is referenced by '{}'",
+                    parent_table, child_table
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn incoming_foreign_keys(catalog: &Catalog, parent_table: &str) -> Vec<(String, ForeignKeyDef)> {
+    let mut out = Vec::new();
+    for (table, schema) in catalog.snapshot_tables() {
+        for fk in schema.foreign_keys {
+            if fk.ref_table == parent_table {
+                out.push((table.clone(), fk));
+            }
+        }
+    }
+    out
+}
+
+fn resolve_cols_to_idxs(schema: &Schema, cols: &[String]) -> Result<Vec<usize>, String> {
+    cols.iter()
+        .map(|c| {
+            schema
+                .columns
+                .iter()
+                .position(|x| x.name == *c)
+                .ok_or_else(|| format!("Unknown column '{}' in FOREIGN KEY", c))
+        })
+        .collect()
+}
+
+fn tuple_eq(a_row: &Row, a_idxs: &[usize], b_row: &Row, b_idxs: &[usize]) -> bool {
+    a_idxs
+        .iter()
+        .zip(b_idxs.iter())
+        .all(|(ai, bi)| a_row.get(*ai) == b_row.get(*bi))
 }

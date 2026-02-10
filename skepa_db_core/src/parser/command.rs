@@ -36,6 +36,11 @@ pub struct ColumnDef {
 pub enum TableConstraintDef {
     PrimaryKey(Vec<String>),
     Unique(Vec<String>),
+    ForeignKey {
+        columns: Vec<String>,
+        ref_table: String,
+        ref_columns: Vec<String>,
+    },
 }
 
 #[derive(Debug)]

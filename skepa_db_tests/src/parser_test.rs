@@ -972,6 +972,37 @@ fn parse_create_table_constraint_unique_single_col() {
 }
 
 #[test]
+fn parse_create_with_foreign_key_constraint() {
+    let cmd = parse("create table orders (id int, user_id int, foreign key(user_id) references users(id))").unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => {
+            assert_eq!(table_constraints.len(), 1);
+        }
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_with_composite_foreign_key_constraint() {
+    let cmd = parse(
+        "create table c (a int, b int, foreign key(a,b) references p(x,y))",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create { table_constraints, .. } => {
+            assert_eq!(table_constraints.len(), 1);
+        }
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_foreign_key_missing_references_errors() {
+    let err = parse("create table c (a int, foreign key(a) users(id))").unwrap_err();
+    assert!(err.to_lowercase().contains("references"));
+}
+
+#[test]
 fn parse_create_table_constraint_primary_single_col() {
     let cmd = parse("create table t (a int, primary key(a))").unwrap();
     match cmd {
@@ -1091,5 +1122,5 @@ fn parse_delete_where_value_can_be_quoted_spaces() {
 #[test]
 fn parse_create_rejects_unknown_table_constraint_token() {
     let err = parse("create table t (a int, foreign key(a))").unwrap_err();
-    assert!(err.to_lowercase().contains("unknown"));
+    assert!(err.to_lowercase().contains("references"));
 }
