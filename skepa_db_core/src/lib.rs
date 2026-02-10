@@ -82,6 +82,18 @@ impl Database {
         };
         let is_create = matches!(cmd, Command::Create { .. });
         let is_wal_write = matches!(cmd, Command::Insert { .. } | Command::Update { .. } | Command::Delete { .. });
+        let is_in_tx = self.current_tx.is_some();
+
+        let pre_catalog = if !is_in_tx && is_wal_write {
+            Some(self.catalog.clone())
+        } else {
+            None
+        };
+        let pre_storage = if !is_in_tx && is_wal_write {
+            Some(self.storage.clone())
+        } else {
+            None
+        };
 
         let out = engine::execute_command(cmd, &mut self.catalog, &mut self.storage)?;
 
@@ -93,6 +105,16 @@ impl Database {
                 }
             }
             return Ok(out);
+        }
+
+        if is_wal_write {
+            if let Err(e) = engine::validate_no_action_constraints(&self.catalog, &self.storage) {
+                if let (Some(c), Some(s)) = (pre_catalog, pre_storage) {
+                    self.catalog = c;
+                    self.storage = s;
+                }
+                return Err(e);
+            }
         }
 
         if is_create {
@@ -261,6 +283,26 @@ impl Database {
     }
 
     fn handle_commit(&mut self) -> Result<String, String> {
+        let snapshot_catalog = self
+            .current_tx
+            .as_ref()
+            .ok_or_else(|| "No active transaction".to_string())?
+            .snapshot_catalog
+            .clone();
+        let snapshot_storage = self
+            .current_tx
+            .as_ref()
+            .ok_or_else(|| "No active transaction".to_string())?
+            .snapshot_storage
+            .clone();
+
+        if let Err(e) = engine::validate_no_action_constraints(&self.catalog, &self.storage) {
+            self.catalog = snapshot_catalog;
+            self.storage = snapshot_storage;
+            self.current_tx = None;
+            return Err(e);
+        }
+
         let tx = self
             .current_tx
             .take()

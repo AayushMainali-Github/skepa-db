@@ -1679,7 +1679,7 @@ fn test_foreign_key_on_delete_no_action_behaves_like_restrict() {
     db.execute("insert into p values (1)").unwrap();
     db.execute("insert into c values (1, 1)").unwrap();
     let err = db.execute("delete from p where id = 1").unwrap_err();
-    assert!(err.to_lowercase().contains("restrict"));
+    assert!(err.to_lowercase().contains("no action"));
 }
 
 #[test]
@@ -1691,7 +1691,41 @@ fn test_foreign_key_on_update_no_action_behaves_like_restrict() {
     db.execute("insert into p values (1)").unwrap();
     db.execute("insert into c values (1, 1)").unwrap();
     let err = db.execute("update p set id = 2 where id = 1").unwrap_err();
-    assert!(err.to_lowercase().contains("restrict"));
+    assert!(err.to_lowercase().contains("no action"));
+}
+
+#[test]
+fn test_foreign_key_no_action_deferred_until_commit_can_be_fixed_in_tx() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on update no action)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("update p set id = 2 where id = 1").unwrap();
+    db.execute("update c set pid = 2 where id = 1").unwrap();
+    let out = db.execute("commit").unwrap();
+    assert_eq!(out, "transaction committed");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n1\t2");
+}
+
+#[test]
+fn test_foreign_key_no_action_commit_fails_if_still_violated() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on update no action)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("update p set id = 2 where id = 1").unwrap();
+    let err = db.execute("commit").unwrap_err();
+    assert!(err.to_lowercase().contains("no action"));
+    assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n1\t1");
 }
 
 #[test]
