@@ -38,6 +38,8 @@ struct TableConstraintFile {
     #[serde(default)]
     unique: Vec<Vec<String>>,
     #[serde(default)]
+    secondary_indexes: Vec<Vec<String>>,
+    #[serde(default)]
     foreign_keys: Vec<ForeignKeyFile>,
 }
 
@@ -267,6 +269,39 @@ impl Catalog {
         Ok(())
     }
 
+    pub fn add_secondary_index(&mut self, table: &str, cols: Vec<String>) -> Result<(), String> {
+        let schema = self
+            .tables
+            .get_mut(table)
+            .ok_or_else(|| format!("Table '{}' does not exist", table))?;
+        if cols.is_empty() {
+            return Err("INDEX column list cannot be empty".to_string());
+        }
+        for c in &cols {
+            if schema.columns.iter().all(|col| col.name != *c) {
+                return Err(format!("INDEX references unknown column '{}'", c));
+            }
+        }
+        if schema.secondary_indexes.iter().any(|x| x == &cols) {
+            return Err(format!("INDEX on ({}) already exists", cols.join(",")));
+        }
+        schema.secondary_indexes.push(cols);
+        Ok(())
+    }
+
+    pub fn drop_secondary_index(&mut self, table: &str, cols: &[String]) -> Result<(), String> {
+        let schema = self
+            .tables
+            .get_mut(table)
+            .ok_or_else(|| format!("Table '{}' does not exist", table))?;
+        let before = schema.secondary_indexes.len();
+        schema.secondary_indexes.retain(|x| x != cols);
+        if before == schema.secondary_indexes.len() {
+            return Err(format!("INDEX on ({}) does not exist", cols.join(",")));
+        }
+        Ok(())
+    }
+
     pub fn drop_unique_constraint(&mut self, table: &str, cols: &[String]) -> Result<(), String> {
         let schema = self
             .tables
@@ -446,6 +481,7 @@ impl Catalog {
                 TableConstraintFile {
                     primary_key: schema.primary_key.clone(),
                     unique: schema.unique_constraints.clone(),
+                    secondary_indexes: schema.secondary_indexes.clone(),
                     foreign_keys: schema
                         .foreign_keys
                         .iter()
@@ -508,32 +544,36 @@ impl Catalog {
             }
             let tc = file_constraints.get(&table).cloned().unwrap_or_default();
             tables.insert(
-                table,
-                Schema::with_constraints(
-                    columns,
-                    tc.primary_key,
-                    tc.unique,
-                    tc.foreign_keys
-                        .into_iter()
-                        .map(|fk| ForeignKeyDef {
-                            columns: fk.columns,
-                            ref_table: fk.ref_table,
-                            ref_columns: fk.ref_columns,
-                            on_delete: match fk.on_delete.to_lowercase().as_str() {
-                                "cascade" => ForeignKeyAction::Cascade,
-                                "set null" => ForeignKeyAction::SetNull,
-                                "no action" => ForeignKeyAction::NoAction,
-                                _ => ForeignKeyAction::Restrict,
-                            },
-                            on_update: match fk.on_update.to_lowercase().as_str() {
-                                "cascade" => ForeignKeyAction::Cascade,
-                                "set null" => ForeignKeyAction::SetNull,
-                                "no action" => ForeignKeyAction::NoAction,
-                                _ => ForeignKeyAction::Restrict,
-                            },
-                        })
-                        .collect(),
-                ),
+                table.clone(),
+                {
+                    let mut schema = Schema::with_constraints(
+                        columns,
+                        tc.primary_key,
+                        tc.unique,
+                        tc.foreign_keys
+                            .into_iter()
+                            .map(|fk| ForeignKeyDef {
+                                columns: fk.columns,
+                                ref_table: fk.ref_table,
+                                ref_columns: fk.ref_columns,
+                                on_delete: match fk.on_delete.to_lowercase().as_str() {
+                                    "cascade" => ForeignKeyAction::Cascade,
+                                    "set null" => ForeignKeyAction::SetNull,
+                                    "no action" => ForeignKeyAction::NoAction,
+                                    _ => ForeignKeyAction::Restrict,
+                                },
+                                on_update: match fk.on_update.to_lowercase().as_str() {
+                                    "cascade" => ForeignKeyAction::Cascade,
+                                    "set null" => ForeignKeyAction::SetNull,
+                                    "no action" => ForeignKeyAction::NoAction,
+                                    _ => ForeignKeyAction::Restrict,
+                                },
+                            })
+                            .collect(),
+                    );
+                    schema.secondary_indexes = tc.secondary_indexes;
+                    schema
+                },
             );
         }
 

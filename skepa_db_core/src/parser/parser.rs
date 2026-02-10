@@ -16,6 +16,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "commit" => parse_commit(&tokens),
         "rollback" => parse_rollback(&tokens),
         "create" => parse_create(&tokens),
+        "drop" => parse_drop(&tokens),
         "alter" => parse_alter(&tokens),
         "insert" => parse_insert(&tokens),
         "update" => parse_update(&tokens),
@@ -292,6 +293,9 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
 }
 
 fn parse_create(tokens: &[String]) -> Result<Command, String> {
+    if tokens.len() >= 2 && tokens[1].eq_ignore_ascii_case("index") {
+        return parse_create_index(tokens);
+    }
     // create table <table> ( <col> <type> [, <col> <type> ...] )
     if tokens.len() < 7 {
         return Err("Usage: create table <table> (<col> <type>, ...)".to_string());
@@ -354,6 +358,45 @@ fn parse_create(tokens: &[String]) -> Result<Command, String> {
         table,
         columns: cols,
         table_constraints,
+    })
+}
+
+fn parse_drop(tokens: &[String]) -> Result<Command, String> {
+    if tokens.len() >= 2 && tokens[1].eq_ignore_ascii_case("index") {
+        return parse_drop_index(tokens);
+    }
+    Err("Unknown command 'drop'".to_string())
+}
+
+fn parse_create_index(tokens: &[String]) -> Result<Command, String> {
+    // create index on <table> (col[,col...])
+    if tokens.len() < 7 || !tokens[2].eq_ignore_ascii_case("on") {
+        return Err("Usage: create index on <table> (<col>, ...)".to_string());
+    }
+    let table = tokens[3].clone();
+    let (cols, next) = parse_column_name_list(tokens, 4, tokens.len())?;
+    if next != tokens.len() {
+        return Err("Usage: create index on <table> (<col>, ...)".to_string());
+    }
+    Ok(Command::CreateIndex {
+        table,
+        columns: cols,
+    })
+}
+
+fn parse_drop_index(tokens: &[String]) -> Result<Command, String> {
+    // drop index on <table> (col[,col...])
+    if tokens.len() < 7 || !tokens[2].eq_ignore_ascii_case("on") {
+        return Err("Usage: drop index on <table> (<col>, ...)".to_string());
+    }
+    let table = tokens[3].clone();
+    let (cols, next) = parse_column_name_list(tokens, 4, tokens.len())?;
+    if next != tokens.len() {
+        return Err("Usage: drop index on <table> (<col>, ...)".to_string());
+    }
+    Ok(Command::DropIndex {
+        table,
+        columns: cols,
     })
 }
 

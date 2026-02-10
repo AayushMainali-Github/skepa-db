@@ -84,6 +84,14 @@ pub enum Command {
         columns: Vec<ColumnDef>,
         table_constraints: Vec<TableConstraintDef>,
     },
+    CreateIndex {
+        table: String,
+        columns: Vec<String>,
+    },
+    DropIndex {
+        table: String,
+        columns: Vec<String>,
+    },
     Alter {
         table: String,
         action: AlterAction,

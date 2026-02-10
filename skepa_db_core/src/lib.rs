@@ -68,12 +68,25 @@ impl Database {
             return self.handle_rollback();
         }
 
-        if self.current_tx.is_some() && matches!(cmd, Command::Create { .. } | Command::Alter { .. }) {
-            return Err("CREATE/ALTER TABLE is auto-commit and cannot run inside an active transaction".to_string());
+        if self.current_tx.is_some()
+            && matches!(
+                cmd,
+                Command::Create { .. }
+                    | Command::Alter { .. }
+                    | Command::CreateIndex { .. }
+                    | Command::DropIndex { .. }
+            )
+        {
+            return Err(
+                "CREATE/ALTER TABLE and CREATE/DROP INDEX are auto-commit and cannot run inside an active transaction"
+                    .to_string(),
+            );
         }
 
         let table_name = match &cmd {
             Command::Create { table, .. } => Some(table.clone()),
+            Command::CreateIndex { table, .. } => Some(table.clone()),
+            Command::DropIndex { table, .. } => Some(table.clone()),
             Command::Alter { table, .. } => Some(table.clone()),
             Command::Insert { table, .. } => Some(table.clone()),
             Command::Update { table, .. } => Some(table.clone()),
@@ -81,7 +94,13 @@ impl Database {
             Command::Select { .. } => None,
             Command::Begin | Command::Commit | Command::Rollback => None,
         };
-        let is_schema_write = matches!(cmd, Command::Create { .. } | Command::Alter { .. });
+        let is_schema_write = matches!(
+            cmd,
+            Command::Create { .. }
+                | Command::Alter { .. }
+                | Command::CreateIndex { .. }
+                | Command::DropIndex { .. }
+        );
         let is_wal_write = matches!(cmd, Command::Insert { .. } | Command::Update { .. } | Command::Delete { .. });
         let is_in_tx = self.current_tx.is_some();
 

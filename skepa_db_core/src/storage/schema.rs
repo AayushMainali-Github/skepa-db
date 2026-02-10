@@ -26,6 +26,7 @@ pub struct Schema {
     pub columns: Vec<Column>,
     pub primary_key: Vec<String>,
     pub unique_constraints: Vec<Vec<String>>,
+    pub secondary_indexes: Vec<Vec<String>>,
     pub foreign_keys: Vec<ForeignKeyDef>,
 }
 
@@ -36,6 +37,7 @@ impl Schema {
             columns,
             primary_key: Vec::new(),
             unique_constraints: Vec::new(),
+            secondary_indexes: Vec::new(),
             foreign_keys: Vec::new(),
         }
     }
@@ -50,6 +52,7 @@ impl Schema {
             columns,
             primary_key,
             unique_constraints,
+            secondary_indexes: Vec::new(),
             foreign_keys,
         }
     }

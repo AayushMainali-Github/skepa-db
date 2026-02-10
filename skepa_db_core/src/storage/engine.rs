@@ -64,6 +64,17 @@ pub trait StorageEngine {
         Ok(None)
     }
 
+    /// Lookup row indices by equality on a single-column non-unique secondary index.
+    fn lookup_secondary_row_indices(
+        &self,
+        _table: &str,
+        _schema: &Schema,
+        _column: &str,
+        _rhs_token: &str,
+    ) -> Result<Option<Vec<usize>>, String> {
+        Ok(None)
+    }
+
     /// Lookup conflicting existing row for any UNIQUE tuple (single or composite).
     fn lookup_unique_conflict(
         &self,

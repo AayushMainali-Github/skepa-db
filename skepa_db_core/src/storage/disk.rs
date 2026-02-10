@@ -21,6 +21,7 @@ pub struct DiskStorage {
     next_row_id: HashMap<String, u64>,
     pk_indexes: HashMap<String, PrimaryIndex>,
     unique_indexes: HashMap<String, Vec<UniqueIndex>>,
+    secondary_indexes: HashMap<String, Vec<SecondaryIndex>>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,12 +37,21 @@ struct UniqueIndex {
     map: BTreeMap<String, u64>,
 }
 
+#[derive(Debug, Clone)]
+struct SecondaryIndex {
+    cols: Vec<String>,
+    col_idxs: Vec<usize>,
+    map: BTreeMap<String, Vec<u64>>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct TableIndexSnapshot {
     #[serde(default)]
     pk: Option<IndexSnapshot>,
     #[serde(default)]
     unique: Vec<IndexSnapshot>,
+    #[serde(default)]
+    secondary: Vec<SecondaryIndexSnapshot>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -52,6 +62,22 @@ struct IndexSnapshot {
     col_idxs: Vec<usize>,
     #[serde(default)]
     entries: Vec<IndexEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SecondaryIndexSnapshot {
+    #[serde(default)]
+    cols: Vec<String>,
+    #[serde(default)]
+    col_idxs: Vec<usize>,
+    #[serde(default)]
+    entries: Vec<SecondaryIndexEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SecondaryIndexEntry {
+    key: String,
+    row_ids: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +97,7 @@ impl DiskStorage {
             next_row_id: HashMap::new(),
             pk_indexes: HashMap::new(),
             unique_indexes: HashMap::new(),
+            secondary_indexes: HashMap::new(),
         })
     }
 
@@ -228,6 +255,7 @@ impl StorageEngine for DiskStorage {
         self.next_row_id.insert(table.to_string(), 1);
         self.pk_indexes.remove(table);
         self.unique_indexes.remove(table);
+        self.secondary_indexes.remove(table);
         Ok(())
     }
 
@@ -422,6 +450,40 @@ impl StorageEngine for DiskStorage {
         }
         Ok(None)
     }
+
+    fn lookup_secondary_row_indices(
+        &self,
+        table: &str,
+        schema: &Schema,
+        column: &str,
+        rhs_token: &str,
+    ) -> Result<Option<Vec<usize>>, String> {
+        let indexes = match self.secondary_indexes.get(table) {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+        let Some(col_idx) = schema.columns.iter().position(|c| c.name == column) else {
+            return Ok(None);
+        };
+        let idx = indexes
+            .iter()
+            .find(|s| s.col_idxs.len() == 1 && s.col_idxs[0] == col_idx);
+        let Some(idx) = idx else {
+            return Ok(None);
+        };
+        let dtype = &schema.columns[col_idx].dtype;
+        let rhs = parse_value(dtype, rhs_token)?;
+        let key = encode_key_parts(&[value_to_string(&rhs)]);
+        let row_ids = match idx.map.get(&key) {
+            Some(v) => v,
+            None => return Ok(Some(Vec::new())),
+        };
+        let rows = row_ids
+            .iter()
+            .filter_map(|rid| self.row_index_by_id(table, *rid))
+            .collect::<Vec<_>>();
+        Ok(Some(rows))
+    }
 }
 
 impl DiskStorage {
@@ -462,7 +524,24 @@ impl DiskStorage {
             })
             .collect::<Vec<_>>();
 
-        let payload = serde_json::to_string_pretty(&TableIndexSnapshot { pk, unique })
+        let secondary = self
+            .secondary_indexes
+            .get(table)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| SecondaryIndexSnapshot {
+                cols: s.cols,
+                col_idxs: s.col_idxs,
+                entries: s
+                    .map
+                    .into_iter()
+                    .map(|(k, v)| SecondaryIndexEntry { key: k, row_ids: v })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+
+        let payload = serde_json::to_string_pretty(&TableIndexSnapshot { pk, unique, secondary })
             .map_err(|e| format!("Failed to serialize indexes for '{table}': {e}"))?;
         fs::write(self.index_file_path(table), payload)
             .map_err(|e| format!("Failed to write index file for '{table}': {e}"))
@@ -518,6 +597,22 @@ impl DiskStorage {
                 }
             }
         }
+        if let Some(existing) = self.secondary_indexes.get_mut(table) {
+            for s in existing {
+                if let Some(ss) = snapshot
+                    .secondary
+                    .iter()
+                    .find(|x| x.col_idxs == s.col_idxs && x.cols == s.cols)
+                {
+                    match validate_secondary_snapshot_entries(ss.entries.clone(), &row_ids) {
+                        Ok(map) => s.map = map,
+                        Err(_) => should_heal = true,
+                    }
+                } else {
+                    should_heal = true;
+                }
+            }
+        }
         if should_heal {
             self.persist_indexes(table)?;
         }
@@ -526,7 +621,8 @@ impl DiskStorage {
 
     fn rebuild_indexes_internal(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
         self.rebuild_primary_index(table, schema)?;
-        self.rebuild_unique_indexes(table, schema)
+        self.rebuild_unique_indexes(table, schema)?;
+        self.rebuild_secondary_indexes(table, schema)
     }
 
     fn rebuild_primary_index(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
@@ -621,6 +717,62 @@ impl DiskStorage {
         self.unique_indexes.insert(table.to_string(), indexes);
         Ok(())
     }
+
+    fn rebuild_secondary_indexes(&mut self, table: &str, schema: &Schema) -> Result<(), String> {
+        let rows = self
+            .tables
+            .get(table)
+            .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?;
+        let ids = self
+            .row_ids
+            .get(table)
+            .ok_or_else(|| format!("Table '{}' row ids are missing", table))?;
+        if schema.secondary_indexes.is_empty() {
+            self.secondary_indexes.remove(table);
+            return Ok(());
+        }
+        let mut indexes: Vec<SecondaryIndex> = Vec::new();
+        for cols in &schema.secondary_indexes {
+            let mut col_idxs = Vec::new();
+            for c in cols {
+                let i = schema
+                    .columns
+                    .iter()
+                    .position(|x| x.name == *c)
+                    .ok_or_else(|| format!("Unknown INDEX column '{}'", c))?;
+                col_idxs.push(i);
+            }
+            let mut map: BTreeMap<String, Vec<u64>> = BTreeMap::new();
+            for (row_idx, row) in rows.iter().enumerate() {
+                if col_idxs
+                    .iter()
+                    .any(|i| matches!(row.get(*i), Some(Value::Null)))
+                {
+                    continue;
+                }
+                let parts = col_idxs
+                    .iter()
+                    .map(|i| {
+                        row.get(*i)
+                            .map(value_to_string)
+                            .ok_or_else(|| "Row missing INDEX column".to_string())
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let key = encode_key_parts(&parts);
+                let row_id = *ids
+                    .get(row_idx)
+                    .ok_or_else(|| format!("Table '{}' row-id alignment is corrupted", table))?;
+                map.entry(key).or_default().push(row_id);
+            }
+            indexes.push(SecondaryIndex {
+                cols: cols.clone(),
+                col_idxs,
+                map,
+            });
+        }
+        self.secondary_indexes.insert(table.to_string(), indexes);
+        Ok(())
+    }
 }
 
 fn encode_key_parts(parts: &[String]) -> String {
@@ -680,6 +832,29 @@ fn validate_snapshot_entries(
         if out.insert(e.key, e.row_id).is_some() {
             return Err("Duplicate key in index snapshot".to_string());
         }
+    }
+    Ok(out)
+}
+
+fn validate_secondary_snapshot_entries(
+    entries: Vec<SecondaryIndexEntry>,
+    known_row_ids: &[u64],
+) -> Result<BTreeMap<String, Vec<u64>>, String> {
+    let known: std::collections::HashSet<u64> = known_row_ids.iter().copied().collect();
+    let mut out: BTreeMap<String, Vec<u64>> = BTreeMap::new();
+    for e in entries {
+        if out.contains_key(&e.key) {
+            return Err("Duplicate key in secondary index snapshot".to_string());
+        }
+        if e.row_ids.is_empty() {
+            return Err("Secondary index entry has empty row id list".to_string());
+        }
+        for rid in &e.row_ids {
+            if !known.contains(rid) {
+                return Err("Secondary index entry row id is not present".to_string());
+            }
+        }
+        out.insert(e.key, e.row_ids);
     }
     Ok(out)
 }

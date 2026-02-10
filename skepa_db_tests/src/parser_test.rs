@@ -1358,3 +1358,27 @@ fn parse_alter_drop_not_null() {
         _ => panic!("Expected Alter command"),
     }
 }
+
+#[test]
+fn parse_create_index_basic() {
+    let cmd = parse("create index on users (email)").unwrap();
+    match cmd {
+        Command::CreateIndex { table, columns } => {
+            assert_eq!(table, "users");
+            assert_eq!(columns, vec!["email"]);
+        }
+        _ => panic!("Expected CreateIndex command"),
+    }
+}
+
+#[test]
+fn parse_drop_index_basic() {
+    let cmd = parse("drop index on users (email)").unwrap();
+    match cmd {
+        Command::DropIndex { table, columns } => {
+            assert_eq!(table, "users");
+            assert_eq!(columns, vec!["email"]);
+        }
+        _ => panic!("Expected DropIndex command"),
+    }
+}

@@ -19,6 +19,10 @@ pub fn execute_command(
             columns,
             table_constraints,
         } => handle_create(table, columns, table_constraints, catalog, storage),
+        Command::CreateIndex { table, columns } => {
+            handle_create_index(table, columns, catalog, storage)
+        }
+        Command::DropIndex { table, columns } => handle_drop_index(table, columns, catalog, storage),
         Command::Alter { table, action } => handle_alter(table, action, catalog, storage),
         Command::Insert { table, values } => handle_insert(table, values, catalog, storage),
         Command::Update {
@@ -36,6 +40,38 @@ pub fn execute_command(
             Err("Transaction control is handled by Database".to_string())
         }
     }
+}
+
+fn handle_create_index(
+    table: String,
+    columns: Vec<String>,
+    catalog: &mut Catalog,
+    storage: &mut dyn StorageEngine,
+) -> Result<String, String> {
+    catalog.add_secondary_index(&table, columns.clone())?;
+    let schema = catalog.schema(&table)?;
+    storage.rebuild_indexes(&table, schema)?;
+    Ok(format!(
+        "created index on {}({})",
+        table,
+        columns.join(",")
+    ))
+}
+
+fn handle_drop_index(
+    table: String,
+    columns: Vec<String>,
+    catalog: &mut Catalog,
+    storage: &mut dyn StorageEngine,
+) -> Result<String, String> {
+    catalog.drop_secondary_index(&table, &columns)?;
+    let schema = catalog.schema(&table)?;
+    storage.rebuild_indexes(&table, schema)?;
+    Ok(format!(
+        "dropped index on {}({})",
+        table,
+        columns.join(",")
+    ))
 }
 
 fn handle_alter(
@@ -257,6 +293,13 @@ fn handle_select(
                     Some(r) => vec![r.clone()],
                     None => Vec::new(),
                 }
+            } else if let Some(row_indices) =
+                storage.lookup_secondary_row_indices(&table, schema, &where_clause.column, &where_clause.value)?
+            {
+                row_indices
+                    .into_iter()
+                    .filter_map(|i| rows.get(i).cloned())
+                    .collect()
             } else {
                 filter_rows(schema, rows, &where_clause)?
             }
@@ -301,13 +344,19 @@ fn handle_update(
         .position(|c| c.name == filter.column)
         .ok_or_else(|| format!("Unknown column '{}' in WHERE", filter.column))?;
     let where_dtype = &schema.columns[where_idx].dtype;
-    let targeted_row_idx = if filter.op == CompareOp::Eq
+    let targeted_row_indices = if filter.op == CompareOp::Eq
         && schema.primary_key.len() == 1
         && schema.primary_key.first().is_some_and(|pk| pk == &filter.column)
     {
-        storage.lookup_pk_row_index(&table, schema, &filter.value)?
+        storage
+            .lookup_pk_row_index(&table, schema, &filter.value)?
+            .map(|i| vec![i])
     } else if filter.op == CompareOp::Eq {
-        storage.lookup_unique_row_index(&table, schema, &filter.column, &filter.value)?
+        if let Some(i) = storage.lookup_unique_row_index(&table, schema, &filter.column, &filter.value)? {
+            Some(vec![i])
+        } else {
+            storage.lookup_secondary_row_indices(&table, schema, &filter.column, &filter.value)?
+        }
     } else {
         None
     };
@@ -319,8 +368,12 @@ fn handle_update(
         let mut new_rows = rows.to_vec();
         let old_indices: Vec<usize> = (0..rows.len()).collect();
 
-        if let Some(i) = targeted_row_idx {
-            if let Some(row) = new_rows.get_mut(i) {
+        if let Some(indices) = targeted_row_indices {
+            for i in indices {
+                if i >= new_rows.len() {
+                    continue;
+                }
+                let row = &mut new_rows[i];
                 let cell = row
                     .get(where_idx)
                     .ok_or_else(|| format!("Row is missing value for column '{}'", filter.column))?;
@@ -376,13 +429,19 @@ fn handle_delete(
         .position(|c| c.name == filter.column)
         .ok_or_else(|| format!("Unknown column '{}' in WHERE", filter.column))?;
     let where_dtype = &schema.columns[where_idx].dtype;
-    let targeted_row_idx = if filter.op == CompareOp::Eq
+    let targeted_row_indices = if filter.op == CompareOp::Eq
         && schema.primary_key.len() == 1
         && schema.primary_key.first().is_some_and(|pk| pk == &filter.column)
     {
-        storage.lookup_pk_row_index(&table, schema, &filter.value)?
+        storage
+            .lookup_pk_row_index(&table, schema, &filter.value)?
+            .map(|i| vec![i])
     } else if filter.op == CompareOp::Eq {
-        storage.lookup_unique_row_index(&table, schema, &filter.column, &filter.value)?
+        if let Some(i) = storage.lookup_unique_row_index(&table, schema, &filter.column, &filter.value)? {
+            Some(vec![i])
+        } else {
+            storage.lookup_secondary_row_indices(&table, schema, &filter.column, &filter.value)?
+        }
     } else {
         None
     };
@@ -394,10 +453,16 @@ fn handle_delete(
         let mut kept_rows: Vec<Row> = Vec::new();
         let mut kept_old_indices: Vec<usize> = Vec::new();
         let mut deleted_rows: Vec<Row> = Vec::new();
-        if let Some(i) = targeted_row_idx {
-            if i < rows.len() {
+        if let Some(indices) = targeted_row_indices {
+            let targets: std::collections::HashSet<usize> = indices.into_iter().collect();
+            for (idx, row) in rows.iter().enumerate() {
+                if !targets.contains(&idx) {
+                    kept_rows.push(row.clone());
+                    kept_old_indices.push(idx);
+                    continue;
+                }
                 let should_delete = row_matches(
-                    &rows[i],
+                    row,
                     where_idx,
                     &filter.column,
                     where_dtype,
@@ -405,21 +470,12 @@ fn handle_delete(
                     &filter.value,
                 )?;
                 if should_delete {
-                    validate_restrict_on_parent_delete(catalog, storage, &table, schema, &rows[i])?;
-                    deleted = 1;
-                    for (idx, row) in rows.iter().enumerate() {
-                        if idx != i {
-                            kept_rows.push(row.clone());
-                            kept_old_indices.push(idx);
-                        } else {
-                            deleted_rows.push(row.clone());
-                        }
-                    }
+                    validate_restrict_on_parent_delete(catalog, storage, &table, schema, row)?;
+                    deleted += 1;
+                    deleted_rows.push(row.clone());
                 } else {
-                    for (idx, row) in rows.iter().enumerate() {
-                        kept_rows.push(row.clone());
-                        kept_old_indices.push(idx);
-                    }
+                    kept_rows.push(row.clone());
+                    kept_old_indices.push(idx);
                 }
             }
         } else {

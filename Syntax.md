@@ -24,6 +24,15 @@
   - `add unique(...)` and `add foreign key(...)` validate existing table rows.
   - `set not null` validates existing rows and fails if any row has `null` in that column.
 
+## Index
+- Creates/drops a secondary (non-unique) index.
+- **Syntax**:
+  - `create index on <table> (<col,...>)`
+  - `drop index on <table> (<col,...>)`
+- Notes:
+  - Current planner uses single-column equality indexes for `select`, `update`, and `delete` where possible.
+  - Index entries skip rows where indexed column values are `null`.
+
 ## Insert
 - Inserts one row into a table.
 - **Syntax**: `insert into <table> values (<val>, <val>, ...)`

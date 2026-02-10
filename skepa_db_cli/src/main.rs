@@ -37,6 +37,8 @@ fn main() {
             println!("  alter table <table> drop foreign key(<col,...>) references <table>(<col,...>)");
             println!("  alter table <table> alter column <col> set not null");
             println!("  alter table <table> alter column <col> drop not null");
+            println!("  create index on <table> (<col,...>)");
+            println!("  drop index on <table> (<col,...>)");
             println!("  insert into <table> values (<v1>, <v2>, ...)");
             println!("  update <table> set <col> = <value> [, <col> = <value> ...] where <column> <op> <value>");
             println!("  delete from <table> where <column> <op> <value>");

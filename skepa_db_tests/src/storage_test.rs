@@ -812,3 +812,20 @@ fn unique_index_does_not_block_multiple_null_values() {
         );
     }
 }
+
+#[test]
+fn secondary_index_persists_across_reopen() {
+    let path = temp_dir("secondary_index_persist");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int, city text)").unwrap();
+        db.execute("create index on users (city)").unwrap();
+        db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+        db.execute(r#"insert into users values (2, "la")"#).unwrap();
+    }
+    {
+        let mut db = Database::open(path.clone());
+        let out = db.execute(r#"select * from users where city = "ny""#).unwrap();
+        assert_eq!(out, "id\tcity\n1\tny");
+    }
+}
