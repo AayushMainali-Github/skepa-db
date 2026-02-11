@@ -1862,6 +1862,30 @@ fn parse_select_group_having_order_by_aggregate() {
     }
 }
 
+#[test]
+fn parse_select_with_offset_only() {
+    let cmd = parse("select * from users offset 3").unwrap();
+    match cmd {
+        Command::Select { offset, limit, .. } => {
+            assert_eq!(offset, Some(3));
+            assert_eq!(limit, None);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_with_limit_and_offset() {
+    let cmd = parse("select * from users order by id asc limit 5 offset 2").unwrap();
+    match cmd {
+        Command::Select { offset, limit, .. } => {
+            assert_eq!(offset, Some(2));
+            assert_eq!(limit, Some(5));
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
 
 
 

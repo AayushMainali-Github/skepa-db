@@ -41,7 +41,8 @@ pub fn execute_command(
             having,
             order_by,
             limit,
-        } => handle_select(table, join, columns, filter, group_by, having, order_by, limit, catalog, storage),
+            offset,
+        } => handle_select(table, join, columns, filter, group_by, having, order_by, limit, offset, catalog, storage),
         Command::Begin | Command::Commit | Command::Rollback => {
             Err("Transaction control is handled by Database".to_string())
         }
@@ -277,6 +278,7 @@ fn handle_select(
     having: Option<WhereClause>,
     order_by: Option<OrderBy>,
     limit: Option<usize>,
+    offset: Option<usize>,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
 ) -> Result<String, String> {
@@ -366,12 +368,17 @@ fn handle_select(
                 Ordering::Equal
             });
         }
-        let limited_rows = if let Some(n) = limit {
-            ordered_rows.into_iter().take(n).collect::<Vec<_>>()
-        } else {
+        let start = offset.unwrap_or(0);
+        let sliced_rows = if let Some(n) = limit {
             ordered_rows
+                .into_iter()
+                .skip(start)
+                .take(n)
+                .collect::<Vec<_>>()
+        } else {
+            ordered_rows.into_iter().skip(start).collect::<Vec<_>>()
         };
-        return Ok(format_select(&post_schema, &limited_rows));
+        return Ok(format_select(&post_schema, &sliced_rows));
     }
 
     if having.is_some() {
@@ -398,10 +405,15 @@ fn handle_select(
             Ordering::Equal
         });
     }
+    let start = offset.unwrap_or(0);
     let limited_rows = if let Some(n) = limit {
-        ordered_rows.into_iter().take(n).collect::<Vec<_>>()
-    } else {
         ordered_rows
+            .into_iter()
+            .skip(start)
+            .take(n)
+            .collect::<Vec<_>>()
+    } else {
+        ordered_rows.into_iter().skip(start).collect::<Vec<_>>()
     };
 
     let (out_schema, out_rows) = project_rows(&select_schema, &limited_rows, columns.as_ref())?;

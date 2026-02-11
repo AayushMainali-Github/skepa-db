@@ -2754,4 +2754,37 @@ fn test_select_group_by_order_by_sum_desc() {
     assert_eq!(out, "city\tsum(v)\nny\t30\nla\t5");
 }
 
+#[test]
+fn test_select_offset_only() {
+    let mut db = test_db();
+    seed_users_3(&mut db);
+    let out = db
+        .execute("select * from users order by id asc offset 1")
+        .unwrap();
+    assert_eq!(out, "id\tname\tage\n2\tb\t20\n3\tc\t10");
+}
+
+#[test]
+fn test_select_limit_and_offset() {
+    let mut db = test_db();
+    seed_users_3(&mut db);
+    let out = db
+        .execute("select * from users order by id asc limit 1 offset 1")
+        .unwrap();
+    assert_eq!(out, "id\tname\tage\n2\tb\t20");
+}
+
+#[test]
+fn test_select_offset_with_grouped_result() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (2, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (3, "la")"#).unwrap();
+    let out = db
+        .execute("select city,count(*) from t group by city order by city asc offset 1")
+        .unwrap();
+    assert_eq!(out, "city\tcount(*)\nny\t2");
+}
+
 

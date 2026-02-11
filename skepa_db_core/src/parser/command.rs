@@ -162,5 +162,6 @@ pub enum Command {
         having: Option<WhereClause>,
         order_by: Option<OrderBy>,
         limit: Option<usize>,
+        offset: Option<usize>,
     },
 }

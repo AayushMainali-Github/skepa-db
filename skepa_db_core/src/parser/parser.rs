@@ -551,12 +551,13 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     let mut having: Option<WhereClause> = None;
     let mut order_by: Option<OrderBy> = None;
     let mut limit: Option<usize> = None;
+    let mut offset: Option<usize> = None;
 
     if i < tokens.len() && (tokens[i].eq_ignore_ascii_case("join") || tokens[i].eq_ignore_ascii_case("left")) {
         let (join_type, join_kw_idx) = if tokens[i].eq_ignore_ascii_case("left") {
             if i + 1 >= tokens.len() || !tokens[i + 1].eq_ignore_ascii_case("join") {
                 return Err(
-                    "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+                    "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
                 );
             }
             (JoinType::Left, i + 1)
@@ -568,7 +569,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
             || tokens[join_kw_idx + 4] != "="
         {
             return Err(
-                "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+                "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
             );
         }
         join = Some(JoinClause {
@@ -583,7 +584,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("where") {
         if i + 2 >= tokens.len() {
             return Err(
-                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
             );
         }
         let where_end = find_where_end(tokens, i + 1)?;
@@ -623,7 +624,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("order") {
         if i + 2 >= tokens.len() || !tokens[i + 1].eq_ignore_ascii_case("by") {
             return Err(
-                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
             );
         }
         let (ob, next_i) = parse_order_by_list(tokens, i + 2)?;
@@ -634,7 +635,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("limit") {
         if i + 1 >= tokens.len() {
             return Err(
-                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
             );
         }
         let n = tokens[i + 1]
@@ -644,9 +645,22 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
         i += 2;
     }
 
+    if i < tokens.len() && tokens[i].eq_ignore_ascii_case("offset") {
+        if i + 1 >= tokens.len() {
+            return Err(
+                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
+            );
+        }
+        let n = tokens[i + 1]
+            .parse::<usize>()
+            .map_err(|_| "OFFSET must be a non-negative integer".to_string())?;
+        offset = Some(n);
+        i += 2;
+    }
+
     if i != tokens.len() {
         return Err(
-            "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <expr>] [group by <col1,col2>] [having <expr>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <expr>] [group by <col1,col2>] [having <expr>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
         );
     }
 
@@ -659,6 +673,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
         having,
         order_by,
         limit,
+        offset,
     })
 }
 
@@ -925,6 +940,7 @@ fn find_where_end(tokens: &[String], start: usize) -> Result<usize, String> {
             || tokens[i].eq_ignore_ascii_case("having")
             || tokens[i].eq_ignore_ascii_case("order")
             || tokens[i].eq_ignore_ascii_case("limit")
+            || tokens[i].eq_ignore_ascii_case("offset")
         {
             return Ok(i);
         }
@@ -936,7 +952,10 @@ fn find_where_end(tokens: &[String], start: usize) -> Result<usize, String> {
 fn find_having_end(tokens: &[String], start: usize) -> Result<usize, String> {
     let mut i = start;
     while i < tokens.len() {
-        if tokens[i].eq_ignore_ascii_case("order") || tokens[i].eq_ignore_ascii_case("limit") {
+        if tokens[i].eq_ignore_ascii_case("order")
+            || tokens[i].eq_ignore_ascii_case("limit")
+            || tokens[i].eq_ignore_ascii_case("offset")
+        {
             return Ok(i);
         }
         i += 1;
