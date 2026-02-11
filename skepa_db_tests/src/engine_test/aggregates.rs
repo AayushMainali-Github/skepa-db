@@ -316,3 +316,24 @@ fn test_select_offset_with_grouped_result() {
     assert_eq!(out, "city\tcount(*)\nny\t2");
 }
 
+#[test]
+fn test_select_global_aggregates_on_empty_table_returns_one_row() {
+    let mut db = test_db();
+    db.execute("create table t (id int, v int)").unwrap();
+    let out = db
+        .execute("select count(*),count(v),sum(v),avg(v),min(v),max(v) from t")
+        .unwrap();
+    assert_eq!(out, "count(*)\tcount(v)\tsum(v)\tavg(v)\tmin(v)\tmax(v)\n0\t0\tnull\tnull\tnull\tnull");
+}
+
+#[test]
+fn test_select_global_aggregate_with_where_no_rows_returns_one_row() {
+    let mut db = test_db();
+    db.execute("create table t (id int, v int)").unwrap();
+    db.execute("insert into t values (1, 10)").unwrap();
+    let out = db
+        .execute("select count(*),sum(v),avg(v),min(v),max(v) from t where v gt 99")
+        .unwrap();
+    assert_eq!(out, "count(*)\tsum(v)\tavg(v)\tmin(v)\tmax(v)\n0\tnull\tnull\tnull\tnull");
+}
+

@@ -406,6 +406,18 @@ fn evaluate_aggregate_groups(
     for key in ordered_keys {
         let group_rows = grouped.get(&key).expect("group key exists");
         if group_rows.is_empty() {
+            // Global aggregate over empty input still produces one row
+            // (e.g. count(*) = 0, sum/avg/min/max = null).
+            if select_items.iter().any(|(is_agg, _, _)| !*is_agg) {
+                continue;
+            }
+            let mut out: Row = Vec::new();
+            for (_is_agg, _source_idx, agg_meta) in select_items {
+                let meta = agg_meta.expect("aggregate metadata");
+                let v = evaluate_single_aggregate(schema, group_rows, meta)?;
+                out.push(v);
+            }
+            out_rows.push(out);
             continue;
         }
         let first = &group_rows[0];
@@ -472,6 +484,9 @@ fn evaluate_single_aggregate(
         AggregateFn::Sum => {
             let idx = arg_idx.ok_or_else(|| "sum(*) is not supported".to_string())?;
             let vals = aggregate_input_values(rows, idx, is_distinct);
+            if vals.is_empty() {
+                return Ok(Value::Null);
+            }
             match &schema.columns[idx].dtype {
                 DataType::Int => {
                     let mut acc: i64 = 0;

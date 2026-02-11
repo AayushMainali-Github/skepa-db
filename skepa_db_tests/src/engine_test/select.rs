@@ -347,3 +347,30 @@ fn test_select_offset_then_limit() {
     assert_eq!(out, "id\tname\tage\n2\tb\t20");
 }
 
+#[test]
+fn test_select_order_by_nulls_asc_then_desc() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    db.execute("insert into t values (2, null)").unwrap();
+    db.execute(r#"insert into t values (3, "la")"#).unwrap();
+
+    let asc = db.execute("select id from t order by city asc").unwrap();
+    assert_eq!(asc, "id\n2\n3\n1");
+
+    let desc = db.execute("select id from t order by city desc").unwrap();
+    assert_eq!(desc, "id\n1\n3\n2");
+}
+
+#[test]
+fn test_select_distinct_keeps_single_null() {
+    let mut db = test_db();
+    db.execute("create table t (city text)").unwrap();
+    db.execute(r#"insert into t values ("ny")"#).unwrap();
+    db.execute("insert into t values (null)").unwrap();
+    db.execute("insert into t values (null)").unwrap();
+
+    let out = db.execute("select distinct city from t order by city asc").unwrap();
+    assert_eq!(out, "city\nnull\nny");
+}
+
