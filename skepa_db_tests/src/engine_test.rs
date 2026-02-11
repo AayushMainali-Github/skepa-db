@@ -1,6 +1,7 @@
 use skepa_db_core::Database;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 fn test_db() -> Database {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -1395,6 +1396,67 @@ fn test_transaction_commit_with_multiple_operations() {
     db.execute(r#"delete from users where name = "a""#).unwrap();
     db.execute("commit").unwrap();
     assert_eq!(db.execute("select * from users").unwrap(), "id\tname\tage\n2\tb\t21");
+}
+
+#[test]
+fn test_transaction_commit_conflict_when_table_changed_externally() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_tx_conflict_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut setup = Database::open(path.clone());
+        setup.execute("create table t (id int, v int)").unwrap();
+        setup.execute("insert into t values (1, 10)").unwrap();
+    }
+
+    let mut tx_db = Database::open(path.clone());
+    let mut other_db = Database::open(path.clone());
+
+    tx_db.execute("begin").unwrap();
+    tx_db.execute("update t set v = 11 where id = 1").unwrap();
+    std::thread::sleep(Duration::from_millis(5));
+    other_db.execute("insert into t values (2, 20)").unwrap();
+
+    let err = tx_db.execute("commit").unwrap_err();
+    assert!(err.to_lowercase().contains("transaction conflict"));
+
+    // Instance should refresh from disk after conflict.
+    let out = tx_db.execute("select * from t order by id asc").unwrap();
+    assert_eq!(out, "id\tv\n1\t10\n2\t20");
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_transaction_commit_no_conflict_when_other_table_changes() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_tx_no_conflict_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut setup = Database::open(path.clone());
+        setup.execute("create table a (id int, v int)").unwrap();
+        setup.execute("create table b (id int, v int)").unwrap();
+        setup.execute("insert into a values (1, 10)").unwrap();
+        setup.execute("insert into b values (1, 100)").unwrap();
+    }
+
+    let mut tx_db = Database::open(path.clone());
+    let mut other_db = Database::open(path.clone());
+
+    tx_db.execute("begin").unwrap();
+    tx_db.execute("update a set v = 11 where id = 1").unwrap();
+    std::thread::sleep(Duration::from_millis(5));
+    other_db.execute("update b set v = 101 where id = 1").unwrap();
+
+    assert_eq!(tx_db.execute("commit").unwrap(), "transaction committed");
+    assert_eq!(
+        tx_db.execute("select * from a").unwrap(),
+        "id\tv\n1\t11"
+    );
+
+    let _ = std::fs::remove_dir_all(&path);
 }
 
 #[test]
