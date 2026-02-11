@@ -668,8 +668,15 @@ fn parse_order_by_list(tokens: &[String], mut i: usize) -> Result<(OrderBy, usiz
         if i >= tokens.len() {
             return Err("ORDER BY requires at least one column".to_string());
         }
-        let col = tokens[i].clone();
-        i += 1;
+        let col = if i + 3 < tokens.len() && tokens[i + 1] == "(" && tokens[i + 3] == ")" {
+            let c = format!("{}({})", tokens[i], tokens[i + 2]);
+            i += 4;
+            c
+        } else {
+            let c = tokens[i].clone();
+            i += 1;
+            c
+        };
         let mut asc = true;
         if i < tokens.len() {
             if tokens[i].eq_ignore_ascii_case("asc") {

@@ -1660,7 +1660,17 @@ parse_ok_cases!(
     parse_more_select_combo_17 => "select a from t where a = 1 order by a asc limit 7",
     parse_more_select_combo_18 => "select a from t where a = 1 order by a asc limit 8",
     parse_more_select_combo_19 => "select a from t where a = 1 order by a asc limit 9",
-    parse_more_select_combo_20 => "select a from t where a = 1 order by a asc limit 10"
+    parse_more_select_combo_20 => "select a from t where a = 1 order by a asc limit 10",
+    parse_more_group_having_01 => "select city,count(*) from t group by city",
+    parse_more_group_having_02 => "select city,count(*) from t group by city having count(*) gt 0",
+    parse_more_group_having_03 => "select city,sum(v) from t where v gte 1 group by city having sum(v) gte 1",
+    parse_more_group_having_04 => "select city,avg(v) from t group by city having avg(v) lt 100 order by city asc",
+    parse_more_group_having_05 => "select city,min(v),max(v) from t group by city having min(v) lte max(v)",
+    parse_more_group_having_06 => "select count(*) from t having count(*) gte 0",
+    parse_more_group_having_07 => "select count(v) from t having count(v) gte 0",
+    parse_more_group_having_08 => "select city,count(*) from t group by city having (count(*) gt 0 and count(*) lt 10)",
+    parse_more_group_having_09 => "select city,count(*) from t group by city having count(*) gt 0 order by city desc",
+    parse_more_group_having_10 => "select city,count(*) from t group by city having count(*) gt 0 limit 5"
 );
 
 parse_err_cases!(
@@ -1683,7 +1693,11 @@ parse_err_cases!(
     parse_more_err_17 => "alter table t alter column a drop",
     parse_more_err_18 => "select * from t order by a desc limit",
     parse_more_err_19 => "select * from t order by a desc limit none",
-    parse_more_err_20 => "select * from t where a = 1 order by a desc limit 1 extra"
+    parse_more_err_20 => "select * from t where a = 1 order by a desc limit 1 extra",
+    parse_more_err_21 => "select city,count(*) from t group city",
+    parse_more_err_22 => "select city,count(*) from t group by",
+    parse_more_err_23 => "select city,count(*) from t group by city having",
+    parse_more_err_24 => "select city,count(*) from t group by city having count(*) gt 0 extra"
 );
 
 #[test]
@@ -1831,6 +1845,19 @@ fn parse_select_having_without_group_by_is_parsed() {
     let cmd = parse("select count(*) from users having count(*) gt 0").unwrap();
     match cmd {
         Command::Select { having, .. } => assert!(having.is_some()),
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_group_having_order_by_aggregate() {
+    let cmd = parse("select city,count(*) from users group by city having count(*) gt 0 order by count(*) desc").unwrap();
+    match cmd {
+        Command::Select { order_by, .. } => {
+            let ob = order_by.expect("order by");
+            assert_eq!(ob.column, "count(*)");
+            assert!(!ob.asc);
+        }
         _ => panic!("Expected Select command"),
     }
 }

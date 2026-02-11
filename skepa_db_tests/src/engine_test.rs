@@ -2728,4 +2728,30 @@ fn test_select_having_without_group_or_aggregate_errors() {
     assert!(err.to_lowercase().contains("having requires group by or aggregate"));
 }
 
+#[test]
+fn test_select_group_by_order_by_count_desc() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (2, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (3, "la")"#).unwrap();
+    let out = db
+        .execute("select city,count(*) from t group by city order by count(*) desc")
+        .unwrap();
+    assert_eq!(out, "city\tcount(*)\nny\t2\nla\t1");
+}
+
+#[test]
+fn test_select_group_by_order_by_sum_desc() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text, v int)").unwrap();
+    db.execute(r#"insert into t values (1, "ny", 10)"#).unwrap();
+    db.execute(r#"insert into t values (2, "ny", 20)"#).unwrap();
+    db.execute(r#"insert into t values (3, "la", 5)"#).unwrap();
+    let out = db
+        .execute("select city,sum(v) from t group by city order by sum(v) desc")
+        .unwrap();
+    assert_eq!(out, "city\tsum(v)\nny\t30\nla\t5");
+}
+
 
