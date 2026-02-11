@@ -26,6 +26,9 @@ pub(super) fn parse_insert(tokens: &[String]) -> Result<Command, String> {
                 return Err("Bad INSERT values. Values must be comma-separated.".to_string());
             }
             i += 1;
+            if i >= end {
+                return Err("Bad INSERT values. Trailing comma is not allowed.".to_string());
+            }
         }
     }
 

@@ -79,3 +79,8 @@ fn parse_drop_index_missing_parens_errors() {
     assert!(parse("drop index on users id").is_err());
 }
 
+#[test]
+fn parse_drop_index_rejects_extra_tokens() {
+    assert!(parse("drop index on users (id) now").is_err());
+}
+

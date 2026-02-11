@@ -142,6 +142,12 @@ fn insert_allows_no_spaces_around_commas() {
 }
 
 #[test]
+fn insert_rejects_trailing_comma() {
+    let err = parse(r#"insert into users values (1, "ram",)"#).unwrap_err();
+    assert!(err.to_lowercase().contains("trailing comma"));
+}
+
+#[test]
 fn update_requires_set_keyword() {
     let err = parse(r#"update users name = "ravi" where id = 1"#).unwrap_err();
     assert!(err.to_lowercase().contains("usage: update"));

@@ -302,6 +302,39 @@ fn parse_create_with_composite_foreign_key_constraint() {
 }
 
 #[test]
+fn parse_create_foreign_key_accepts_on_update_before_on_delete() {
+    let cmd = parse(
+        "create table c (a int, foreign key(a) references p(id) on update cascade on delete set null)",
+    )
+    .unwrap();
+    match cmd {
+        Command::Create {
+            table_constraints, ..
+        } => {
+            assert_eq!(table_constraints.len(), 1);
+            match &table_constraints[0] {
+                skepa_db_core::parser::command::TableConstraintDef::ForeignKey {
+                    on_delete,
+                    on_update,
+                    ..
+                } => {
+                    assert_eq!(
+                        *on_update,
+                        skepa_db_core::parser::command::ForeignKeyAction::Cascade
+                    );
+                    assert_eq!(
+                        *on_delete,
+                        skepa_db_core::parser::command::ForeignKeyAction::SetNull
+                    );
+                }
+                _ => panic!("Expected foreign key table constraint"),
+            }
+        }
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
 fn parse_foreign_key_missing_references_errors() {
     let err = parse("create table c (a int, foreign key(a) users(id))").unwrap_err();
     assert!(err.to_lowercase().contains("references"));

@@ -680,6 +680,34 @@ fn parse_select_distinct_basic() {
 }
 
 #[test]
+fn parse_select_distinct_star() {
+    let cmd = parse("select distinct * from users").unwrap();
+    match cmd {
+        Command::Select {
+            distinct, columns, ..
+        } => {
+            assert!(distinct);
+            assert_eq!(columns.unwrap(), Vec::<String>::new());
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_order_by_function_with_spaced_parens() {
+    let cmd = parse("select city,count(*) from users group by city order by count ( * ) desc")
+        .unwrap();
+    match cmd {
+        Command::Select { order_by, .. } => {
+            let ob = order_by.expect("order by");
+            assert_eq!(ob.column, "count(*)");
+            assert!(!ob.asc);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
 fn parse_select_with_empty_group_by_errors() {
     assert!(parse("select city,count(*) from users group by").is_err());
 }

@@ -25,7 +25,59 @@ fn parse_alter_add_foreign_key() {
     )
     .unwrap();
     match cmd {
-        Command::Alter { table, .. } => assert_eq!(table, "c"),
+        Command::Alter { table, action } => {
+            assert_eq!(table, "c");
+            match action {
+                skepa_db_core::parser::command::AlterAction::AddForeignKey {
+                    columns,
+                    ref_table,
+                    ref_columns,
+                    on_delete,
+                    on_update,
+                } => {
+                    assert_eq!(columns, vec!["a".to_string()]);
+                    assert_eq!(ref_table, "p");
+                    assert_eq!(ref_columns, vec!["id".to_string()]);
+                    assert_eq!(
+                        on_delete,
+                        skepa_db_core::parser::command::ForeignKeyAction::Cascade
+                    );
+                    assert_eq!(
+                        on_update,
+                        skepa_db_core::parser::command::ForeignKeyAction::NoAction
+                    );
+                }
+                _ => panic!("Expected add foreign key action"),
+            }
+        }
+        _ => panic!("Expected Alter command"),
+    }
+}
+
+#[test]
+fn parse_alter_add_foreign_key_accepts_on_update_before_on_delete() {
+    let cmd = parse(
+        "alter table c add foreign key(a) references p(id) on update set null on delete restrict",
+    )
+    .unwrap();
+    match cmd {
+        Command::Alter { action, .. } => match action {
+            skepa_db_core::parser::command::AlterAction::AddForeignKey {
+                on_delete,
+                on_update,
+                ..
+            } => {
+                assert_eq!(
+                    on_update,
+                    skepa_db_core::parser::command::ForeignKeyAction::SetNull
+                );
+                assert_eq!(
+                    on_delete,
+                    skepa_db_core::parser::command::ForeignKeyAction::Restrict
+                );
+            }
+            _ => panic!("Expected add foreign key action"),
+        },
         _ => panic!("Expected Alter command"),
     }
 }
