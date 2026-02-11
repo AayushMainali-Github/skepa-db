@@ -2685,4 +2685,47 @@ fn test_select_group_by_with_where_before_group() {
     assert_eq!(out, "city\tcount(*)\nla\t1\nny\t1");
 }
 
+#[test]
+fn test_select_group_by_having_filters_groups() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (2, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (3, "la")"#).unwrap();
+    let out = db
+        .execute("select city,count(*) from t group by city having count(*) gt 1 order by city asc")
+        .unwrap();
+    assert_eq!(out, "city\tcount(*)\nny\t2");
+}
+
+#[test]
+fn test_select_global_aggregate_having_true() {
+    let mut db = test_db();
+    db.execute("create table t (id int)").unwrap();
+    db.execute("insert into t values (1)").unwrap();
+    let out = db
+        .execute("select count(*) from t having count(*) gte 1")
+        .unwrap();
+    assert_eq!(out, "count(*)\n1");
+}
+
+#[test]
+fn test_select_global_aggregate_having_false_returns_header_only() {
+    let mut db = test_db();
+    db.execute("create table t (id int)").unwrap();
+    db.execute("insert into t values (1)").unwrap();
+    let out = db
+        .execute("select count(*) from t having count(*) gt 1")
+        .unwrap();
+    assert_eq!(out, "count(*)");
+}
+
+#[test]
+fn test_select_having_without_group_or_aggregate_errors() {
+    let mut db = test_db();
+    db.execute("create table t (id int)").unwrap();
+    let err = db.execute("select id from t having id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("having requires group by or aggregate"));
+}
+
 

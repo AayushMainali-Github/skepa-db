@@ -1810,6 +1810,31 @@ fn parse_select_group_by_missing_by_errors() {
     assert!(parse("select city from users group city").is_err());
 }
 
+#[test]
+fn parse_select_group_by_having() {
+    let cmd = parse("select city,count(*) from users group by city having count(*) gt 1 order by city asc").unwrap();
+    match cmd {
+        Command::Select { group_by, having, .. } => {
+            assert_eq!(group_by.expect("group by"), vec!["city"]);
+            let h = having.expect("having");
+            let p = pred(&h);
+            assert_eq!(p.column, "count(*)");
+            assert_eq!(p.op, CompareOp::Gt);
+            assert_eq!(p.value, "1");
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_having_without_group_by_is_parsed() {
+    let cmd = parse("select count(*) from users having count(*) gt 0").unwrap();
+    match cmd {
+        Command::Select { having, .. } => assert!(having.is_some()),
+        _ => panic!("Expected Select command"),
+    }
+}
+
 
 
 

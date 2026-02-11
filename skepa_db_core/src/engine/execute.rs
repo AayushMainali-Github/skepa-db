@@ -38,9 +38,10 @@ pub fn execute_command(
             columns,
             filter,
             group_by,
+            having,
             order_by,
             limit,
-        } => handle_select(table, join, columns, filter, group_by, order_by, limit, catalog, storage),
+        } => handle_select(table, join, columns, filter, group_by, having, order_by, limit, catalog, storage),
         Command::Begin | Command::Commit | Command::Rollback => {
             Err("Transaction control is handled by Database".to_string())
         }
@@ -273,6 +274,7 @@ fn handle_select(
     columns: Option<Vec<String>>,
     filter: Option<WhereClause>,
     group_by: Option<Vec<String>>,
+    having: Option<WhereClause>,
     order_by: Option<OrderBy>,
     limit: Option<usize>,
     catalog: &mut Catalog,
@@ -334,12 +336,15 @@ fn handle_select(
     let is_grouped = has_group_or_aggregate(columns.as_ref(), group_by.as_ref());
 
     if is_grouped {
-        let (post_schema, post_rows) = evaluate_grouped_select(
+        let (post_schema, mut post_rows) = evaluate_grouped_select(
             &select_schema,
             &filtered_rows,
             columns.as_ref(),
             group_by.as_ref(),
         )?;
+        if let Some(having_clause) = having.as_ref() {
+            post_rows = filter_rows(&post_schema, &post_rows, having_clause)?;
+        }
 
         let mut ordered_rows = post_rows;
         if let Some(ob) = order_by {
@@ -367,6 +372,10 @@ fn handle_select(
             ordered_rows
         };
         return Ok(format_select(&post_schema, &limited_rows));
+    }
+
+    if having.is_some() {
+        return Err("HAVING requires GROUP BY or aggregate functions".to_string());
     }
 
     let mut ordered_rows = filtered_rows;

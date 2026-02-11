@@ -548,6 +548,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     let mut join: Option<JoinClause> = None;
     let mut filter: Option<WhereClause> = None;
     let mut group_by: Option<Vec<String>> = None;
+    let mut having: Option<WhereClause> = None;
     let mut order_by: Option<OrderBy> = None;
     let mut limit: Option<usize> = None;
 
@@ -596,12 +597,27 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("group") {
         if i + 2 >= tokens.len() || !tokens[i + 1].eq_ignore_ascii_case("by") {
             return Err(
-                "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <expr>] [group by <col1,col2>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+                "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <expr>] [group by <col1,col2>] [having <expr>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
             );
         }
         let (grp, next_i) = parse_group_by_columns(tokens, i + 2)?;
         group_by = Some(grp);
         i = next_i;
+    }
+
+    if i < tokens.len() && tokens[i].eq_ignore_ascii_case("having") {
+        if i + 2 >= tokens.len() {
+            return Err(
+                "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <expr>] [group by <col1,col2>] [having <expr>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            );
+        }
+        let having_end = find_having_end(tokens, i + 1)?;
+        let having_tokens = normalize_function_tokens(&tokens[i + 1..having_end])?;
+        having = Some(parse_where_clause(
+            &having_tokens,
+            "Usage: select <col1,col2|*> from <table> [where <expr>] [group by <col1,col2>] [having <expr>] [order by <column> [asc|desc]] [limit <n>]",
+        )?);
+        i = having_end;
     }
 
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("order") {
@@ -630,7 +646,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
 
     if i != tokens.len() {
         return Err(
-            "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <expr>] [group by <col1,col2>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <expr>] [group by <col1,col2>] [having <expr>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
         );
     }
 
@@ -640,6 +656,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
         columns: Some(columns),
         filter,
         group_by,
+        having,
         order_by,
         limit,
     })
@@ -898,6 +915,7 @@ fn find_where_end(tokens: &[String], start: usize) -> Result<usize, String> {
     let mut i = start;
     while i < tokens.len() {
         if tokens[i].eq_ignore_ascii_case("group")
+            || tokens[i].eq_ignore_ascii_case("having")
             || tokens[i].eq_ignore_ascii_case("order")
             || tokens[i].eq_ignore_ascii_case("limit")
         {
@@ -906,6 +924,32 @@ fn find_where_end(tokens: &[String], start: usize) -> Result<usize, String> {
         i += 1;
     }
     Ok(tokens.len())
+}
+
+fn find_having_end(tokens: &[String], start: usize) -> Result<usize, String> {
+    let mut i = start;
+    while i < tokens.len() {
+        if tokens[i].eq_ignore_ascii_case("order") || tokens[i].eq_ignore_ascii_case("limit") {
+            return Ok(i);
+        }
+        i += 1;
+    }
+    Ok(tokens.len())
+}
+
+fn normalize_function_tokens(tokens: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    while i < tokens.len() {
+        if i + 3 < tokens.len() && tokens[i + 1] == "(" && tokens[i + 3] == ")" {
+            out.push(format!("{}({})", tokens[i], tokens[i + 2]));
+            i += 4;
+        } else {
+            out.push(tokens[i].clone());
+            i += 1;
+        }
+    }
+    Ok(out)
 }
 
 fn parse_datatype_in_create(

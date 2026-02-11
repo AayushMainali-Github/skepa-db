@@ -159,6 +159,7 @@ pub enum Command {
         columns: Option<Vec<String>>,
         filter: Option<WhereClause>,
         group_by: Option<Vec<String>>,
+        having: Option<WhereClause>,
         order_by: Option<OrderBy>,
         limit: Option<usize>,
     },
