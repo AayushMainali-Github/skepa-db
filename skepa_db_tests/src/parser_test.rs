@@ -1767,6 +1767,49 @@ fn parse_select_left_join_requires_join_keyword() {
     assert!(parse("select * from users left profiles on users.id = profiles.user_id").is_err());
 }
 
+#[test]
+fn parse_select_group_by_basic() {
+    let cmd = parse("select city,count(*) from users group by city").unwrap();
+    match cmd {
+        Command::Select { columns, group_by, .. } => {
+            assert_eq!(columns.unwrap(), vec!["city", "count(*)"]);
+            assert_eq!(group_by.expect("group by"), vec!["city"]);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_group_by_where_order_limit() {
+    let cmd = parse("select city,sum(age) from users where age gte 10 group by city order by city asc limit 3").unwrap();
+    match cmd {
+        Command::Select { filter, group_by, order_by, limit, .. } => {
+            assert!(filter.is_some());
+            assert_eq!(group_by.expect("group by"), vec!["city"]);
+            assert_eq!(order_by.expect("order").column, "city");
+            assert_eq!(limit, Some(3));
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_aggregate_without_group_by() {
+    let cmd = parse("select count(*),avg(age) from users").unwrap();
+    match cmd {
+        Command::Select { columns, group_by, .. } => {
+            assert_eq!(columns.unwrap(), vec!["count(*)", "avg(age)"]);
+            assert!(group_by.is_none());
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_group_by_missing_by_errors() {
+    assert!(parse("select city from users group city").is_err());
+}
+
 
 
 

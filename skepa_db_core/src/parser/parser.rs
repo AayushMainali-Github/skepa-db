@@ -547,6 +547,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     let mut i = from_idx + 2;
     let mut join: Option<JoinClause> = None;
     let mut filter: Option<WhereClause> = None;
+    let mut group_by: Option<Vec<String>> = None;
     let mut order_by: Option<OrderBy> = None;
     let mut limit: Option<usize> = None;
 
@@ -592,6 +593,17 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
         i = where_end;
     }
 
+    if i < tokens.len() && tokens[i].eq_ignore_ascii_case("group") {
+        if i + 2 >= tokens.len() || !tokens[i + 1].eq_ignore_ascii_case("by") {
+            return Err(
+                "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <expr>] [group by <col1,col2>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            );
+        }
+        let (grp, next_i) = parse_group_by_columns(tokens, i + 2)?;
+        group_by = Some(grp);
+        i = next_i;
+    }
+
     if i < tokens.len() && tokens[i].eq_ignore_ascii_case("order") {
         if i + 2 >= tokens.len() || !tokens[i + 1].eq_ignore_ascii_case("by") {
             return Err(
@@ -618,7 +630,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
 
     if i != tokens.len() {
         return Err(
-            "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
+            "Usage: select <col1,col2|*> from <table> [join|left join <table2> on <left_col> = <right_col>] [where <expr>] [group by <col1,col2>] [order by <column> [asc|desc]] [limit <n>]".to_string(),
         );
     }
 
@@ -627,6 +639,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
         join,
         columns: Some(columns),
         filter,
+        group_by,
         order_by,
         limit,
     })
@@ -682,29 +695,59 @@ fn parse_select_columns(tokens: &[String]) -> Result<Vec<String>, String> {
     }
 
     let mut columns: Vec<String> = Vec::new();
-    let mut expect_col = true;
-    for tok in tokens {
-        if expect_col {
-            if tok == "," {
-                return Err(
-                    "SELECT column list cannot be empty. Use '*' or comma-separated column names."
-                        .to_string(),
-                );
+    let mut i = 0usize;
+    while i < tokens.len() {
+        if tokens[i] == "," {
+            return Err(
+                "SELECT column list cannot be empty. Use '*' or comma-separated column names."
+                    .to_string(),
+            );
+        }
+        if i + 1 < tokens.len() && tokens[i + 1] == "(" {
+            if i + 3 >= tokens.len() || tokens[i + 3] != ")" {
+                return Err("Bad SELECT function syntax. Use fn(col) or fn(*)".to_string());
             }
-            columns.push(tok.clone());
-            expect_col = false;
-        } else if tok != "," {
-            return Err("Bad SELECT column list. Use comma-separated column names.".to_string());
+            columns.push(format!("{}({})", tokens[i], tokens[i + 2]));
+            i += 4;
         } else {
-            expect_col = true;
+            columns.push(tokens[i].clone());
+            i += 1;
+        }
+        if i < tokens.len() {
+            if tokens[i] != "," {
+                return Err("Bad SELECT column list. Use comma-separated column names.".to_string());
+            }
+            i += 1;
+            if i >= tokens.len() {
+                return Err("SELECT column list cannot end with comma".to_string());
+            }
         }
     }
-
-    if columns.is_empty() || expect_col {
+    if columns.is_empty() {
         return Err("SELECT column list cannot be empty. Use '*' or comma-separated column names.".to_string());
     }
 
     Ok(columns)
+}
+
+fn parse_group_by_columns(tokens: &[String], mut i: usize) -> Result<(Vec<String>, usize), String> {
+    let mut cols: Vec<String> = Vec::new();
+    loop {
+        if i >= tokens.len() {
+            return Err("GROUP BY requires at least one column".to_string());
+        }
+        if tokens[i] == "," || tokens[i] == "(" || tokens[i] == ")" {
+            return Err("Bad GROUP BY column list".to_string());
+        }
+        cols.push(tokens[i].clone());
+        i += 1;
+        if i < tokens.len() && tokens[i] == "," {
+            i += 1;
+            continue;
+        }
+        break;
+    }
+    Ok((cols, i))
 }
 
 fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
@@ -854,7 +897,10 @@ fn parse_predicate(tokens: &[String], idx: &mut usize, usage_msg: &str) -> Resul
 fn find_where_end(tokens: &[String], start: usize) -> Result<usize, String> {
     let mut i = start;
     while i < tokens.len() {
-        if tokens[i].eq_ignore_ascii_case("order") || tokens[i].eq_ignore_ascii_case("limit") {
+        if tokens[i].eq_ignore_ascii_case("group")
+            || tokens[i].eq_ignore_ascii_case("order")
+            || tokens[i].eq_ignore_ascii_case("limit")
+        {
             return Ok(i);
         }
         i += 1;

@@ -6,6 +6,7 @@ use crate::types::value::{parse_value, value_to_string, Value};
 use crate::types::Row;
 use std::cmp::Ordering;
 use crate::storage::schema::ForeignKeyDef;
+use rust_decimal::Decimal;
 
 /// Executes a parsed command against the catalog and storage engine
 pub fn execute_command(
@@ -36,9 +37,10 @@ pub fn execute_command(
             join,
             columns,
             filter,
+            group_by,
             order_by,
             limit,
-        } => handle_select(table, join, columns, filter, order_by, limit, catalog, storage),
+        } => handle_select(table, join, columns, filter, group_by, order_by, limit, catalog, storage),
         Command::Begin | Command::Commit | Command::Rollback => {
             Err("Transaction control is handled by Database".to_string())
         }
@@ -270,6 +272,7 @@ fn handle_select(
     join: Option<JoinClause>,
     columns: Option<Vec<String>>,
     filter: Option<WhereClause>,
+    group_by: Option<Vec<String>>,
     order_by: Option<OrderBy>,
     limit: Option<usize>,
     catalog: &mut Catalog,
@@ -328,6 +331,44 @@ fn handle_select(
         base_rows.to_vec()
     };
 
+    let is_grouped = has_group_or_aggregate(columns.as_ref(), group_by.as_ref());
+
+    if is_grouped {
+        let (post_schema, post_rows) = evaluate_grouped_select(
+            &select_schema,
+            &filtered_rows,
+            columns.as_ref(),
+            group_by.as_ref(),
+        )?;
+
+        let mut ordered_rows = post_rows;
+        if let Some(ob) = order_by {
+            let mut criteria: Vec<(usize, bool)> = Vec::new();
+            criteria.push((
+                resolve_column_index(&post_schema, &ob.column, "ORDER BY")?,
+                ob.asc,
+            ));
+            for (col, asc) in ob.then_by {
+                criteria.push((resolve_column_index(&post_schema, &col, "ORDER BY")?, asc));
+            }
+            ordered_rows.sort_by(|a, b| {
+                for (idx, asc) in &criteria {
+                    let ord = compare_for_order(a.get(*idx), b.get(*idx), *asc);
+                    if ord != Ordering::Equal {
+                        return ord;
+                    }
+                }
+                Ordering::Equal
+            });
+        }
+        let limited_rows = if let Some(n) = limit {
+            ordered_rows.into_iter().take(n).collect::<Vec<_>>()
+        } else {
+            ordered_rows
+        };
+        return Ok(format_select(&post_schema, &limited_rows));
+    }
+
     let mut ordered_rows = filtered_rows;
     if let Some(ob) = order_by {
         let mut criteria: Vec<(usize, bool)> = Vec::new();
@@ -356,6 +397,347 @@ fn handle_select(
 
     let (out_schema, out_rows) = project_rows(&select_schema, &limited_rows, columns.as_ref())?;
     Ok(format_select(&out_schema, &out_rows))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AggregateFn {
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max,
+}
+
+fn has_group_or_aggregate(columns: Option<&Vec<String>>, group_by: Option<&Vec<String>>) -> bool {
+    if group_by.is_some() {
+        return true;
+    }
+    let Some(cols) = columns else {
+        return false;
+    };
+    cols.iter().any(|c| parse_aggregate_expr(c).is_some())
+}
+
+fn parse_aggregate_expr(token: &str) -> Option<(AggregateFn, String)> {
+    let (fname_raw, rest) = token.split_once('(')?;
+    let arg = rest.strip_suffix(')')?.trim();
+    let func = match fname_raw.to_lowercase().as_str() {
+        "count" => AggregateFn::Count,
+        "sum" => AggregateFn::Sum,
+        "avg" => AggregateFn::Avg,
+        "min" => AggregateFn::Min,
+        "max" => AggregateFn::Max,
+        _ => return None,
+    };
+    if arg.is_empty() {
+        return None;
+    }
+    Some((func, arg.to_string()))
+}
+
+fn evaluate_grouped_select(
+    schema: &Schema,
+    rows: &[Row],
+    columns: Option<&Vec<String>>,
+    group_by: Option<&Vec<String>>,
+) -> Result<(Schema, Vec<Row>), String> {
+    let Some(select_cols) = columns else {
+        return Err("GROUP BY or aggregates require explicit SELECT columns".to_string());
+    };
+    if select_cols.is_empty() {
+        return Err("SELECT * cannot be used with GROUP BY or aggregate functions".to_string());
+    }
+
+    let group_cols = group_by.cloned().unwrap_or_default();
+    let mut group_key_indices: Vec<usize> = Vec::new();
+    for g in &group_cols {
+        group_key_indices.push(resolve_column_index(schema, g, "GROUP BY")?);
+    }
+
+    let mut output_columns: Vec<Column> = Vec::new();
+    let mut select_items: Vec<(bool, usize, Option<(AggregateFn, usize)>)> = Vec::new();
+    // (is_agg, source_idx_for_plain, agg meta)
+    let mut has_agg = false;
+    for sel in select_cols {
+        if let Some((agg_fn, arg)) = parse_aggregate_expr(sel) {
+            has_agg = true;
+            let (dtype, arg_idx_opt) = if arg == "*" {
+                (DataType::BigInt, None)
+            } else {
+                let idx = resolve_column_index(schema, &arg, "SELECT aggregate")?;
+                let col = &schema.columns[idx];
+                let out_dtype = aggregate_output_type(agg_fn, &col.dtype)?;
+                (out_dtype, Some(idx))
+            };
+            output_columns.push(Column {
+                name: sel.clone(),
+                dtype,
+                primary_key: false,
+                unique: false,
+                not_null: false,
+            });
+            select_items.push((true, 0usize, Some((agg_fn, arg_idx_opt.unwrap_or(usize::MAX)))));
+        } else {
+            let idx = resolve_column_index(schema, sel, "SELECT list")?;
+            if !group_key_indices.contains(&idx) {
+                return Err(format!(
+                    "Column '{}' must appear in GROUP BY or be used in an aggregate function",
+                    sel
+                ));
+            }
+            output_columns.push(schema.columns[idx].clone());
+            select_items.push((false, idx, None));
+        }
+    }
+    if !has_agg && group_cols.is_empty() {
+        return Err("Internal error: grouped select without aggregate/group by".to_string());
+    }
+    if has_agg && group_cols.is_empty() {
+        // Global aggregate: use a single implicit group.
+        return evaluate_aggregate_groups(
+            schema,
+            rows,
+            &[],
+            &select_items,
+            Schema::new(output_columns),
+        );
+    }
+    evaluate_aggregate_groups(
+        schema,
+        rows,
+        &group_key_indices,
+        &select_items,
+        Schema::new(output_columns),
+    )
+}
+
+fn evaluate_aggregate_groups(
+    schema: &Schema,
+    rows: &[Row],
+    group_indices: &[usize],
+    select_items: &[(bool, usize, Option<(AggregateFn, usize)>)],
+    out_schema: Schema,
+) -> Result<(Schema, Vec<Row>), String> {
+    let mut grouped: std::collections::HashMap<String, Vec<Row>> = std::collections::HashMap::new();
+    let mut ordered_keys: Vec<String> = Vec::new();
+
+    if group_indices.is_empty() {
+        let key = "__all__".to_string();
+        grouped.insert(key.clone(), rows.to_vec());
+        ordered_keys.push(key);
+    } else {
+        for r in rows {
+            let key = group_indices
+                .iter()
+                .map(|i| value_to_string(&r[*i]))
+                .collect::<Vec<_>>()
+                .join("\u{1F}");
+            if !grouped.contains_key(&key) {
+                ordered_keys.push(key.clone());
+            }
+            grouped.entry(key).or_default().push(r.clone());
+        }
+    }
+
+    let mut out_rows: Vec<Row> = Vec::new();
+    for key in ordered_keys {
+        let group_rows = grouped.get(&key).expect("group key exists");
+        if group_rows.is_empty() {
+            continue;
+        }
+        let first = &group_rows[0];
+        let mut out: Row = Vec::new();
+        for (is_agg, source_idx, agg_meta) in select_items {
+            if !*is_agg {
+                out.push(first[*source_idx].clone());
+                continue;
+            }
+            let (agg_fn, arg_idx) = agg_meta.expect("aggregate metadata");
+            let arg_opt = if arg_idx == usize::MAX {
+                None
+            } else {
+                Some(arg_idx)
+            };
+            let v = evaluate_single_aggregate(schema, group_rows, agg_fn, arg_opt)?;
+            out.push(v);
+        }
+        out_rows.push(out);
+    }
+
+    Ok((out_schema, out_rows))
+}
+
+fn aggregate_output_type(func: AggregateFn, dtype: &DataType) -> Result<DataType, String> {
+    match func {
+        AggregateFn::Count => Ok(DataType::BigInt),
+        AggregateFn::Sum => match dtype {
+            DataType::Int => Ok(DataType::Int),
+            DataType::BigInt => Ok(DataType::BigInt),
+            DataType::Decimal { precision, scale } => Ok(DataType::Decimal {
+                precision: *precision,
+                scale: *scale,
+            }),
+            _ => Err("sum() is only valid for int|bigint|decimal".to_string()),
+        },
+        AggregateFn::Avg => match dtype {
+            DataType::Int | DataType::BigInt => Ok(DataType::Decimal {
+                precision: 38,
+                scale: 6,
+            }),
+            DataType::Decimal { precision, scale } => Ok(DataType::Decimal {
+                precision: *precision,
+                scale: (*scale).max(6),
+            }),
+            _ => Err("avg() is only valid for int|bigint|decimal".to_string()),
+        },
+        AggregateFn::Min | AggregateFn::Max => Ok(dtype.clone()),
+    }
+}
+
+fn evaluate_single_aggregate(
+    schema: &Schema,
+    rows: &[Row],
+    func: AggregateFn,
+    arg_idx: Option<usize>,
+) -> Result<Value, String> {
+    match func {
+        AggregateFn::Count => {
+            let cnt = if let Some(idx) = arg_idx {
+                rows.iter()
+                    .filter(|r| !matches!(r.get(idx), Some(Value::Null)))
+                    .count() as i128
+            } else {
+                rows.len() as i128
+            };
+            Ok(Value::BigInt(cnt))
+        }
+        AggregateFn::Sum => {
+            let idx = arg_idx.ok_or_else(|| "sum(*) is not supported".to_string())?;
+            match &schema.columns[idx].dtype {
+                DataType::Int => {
+                    let mut acc: i64 = 0;
+                    for r in rows {
+                        if let Some(Value::Int(v)) = r.get(idx) {
+                            acc = acc
+                                .checked_add(*v)
+                                .ok_or_else(|| "sum(int) overflow".to_string())?;
+                        }
+                    }
+                    Ok(Value::Int(acc))
+                }
+                DataType::BigInt => {
+                    let mut acc: i128 = 0;
+                    for r in rows {
+                        if let Some(Value::BigInt(v)) = r.get(idx) {
+                            acc = acc
+                                .checked_add(*v)
+                                .ok_or_else(|| "sum(bigint) overflow".to_string())?;
+                        }
+                    }
+                    Ok(Value::BigInt(acc))
+                }
+                DataType::Decimal { .. } => {
+                    let mut acc = Decimal::ZERO;
+                    for r in rows {
+                        if let Some(Value::Decimal(v)) = r.get(idx) {
+                            acc += *v;
+                        }
+                    }
+                    Ok(Value::Decimal(acc))
+                }
+                _ => Err("sum() is only valid for int|bigint|decimal".to_string()),
+            }
+        }
+        AggregateFn::Avg => {
+            let idx = arg_idx.ok_or_else(|| "avg(*) is not supported".to_string())?;
+            let mut cnt: i128 = 0;
+            let mut acc = Decimal::ZERO;
+            match &schema.columns[idx].dtype {
+                DataType::Int => {
+                    for r in rows {
+                        if let Some(Value::Int(v)) = r.get(idx) {
+                            acc += Decimal::from(*v);
+                            cnt += 1;
+                        }
+                    }
+                }
+                DataType::BigInt => {
+                    for r in rows {
+                        if let Some(Value::BigInt(v)) = r.get(idx) {
+                            acc += Decimal::from_i128_with_scale(*v, 0);
+                            cnt += 1;
+                        }
+                    }
+                }
+                DataType::Decimal { .. } => {
+                    for r in rows {
+                        if let Some(Value::Decimal(v)) = r.get(idx) {
+                            acc += *v;
+                            cnt += 1;
+                        }
+                    }
+                }
+                _ => return Err("avg() is only valid for int|bigint|decimal".to_string()),
+            }
+            if cnt == 0 {
+                return Ok(Value::Null);
+            }
+            Ok(Value::Decimal(acc / Decimal::from_i128_with_scale(cnt, 0)))
+        }
+        AggregateFn::Min | AggregateFn::Max => {
+            let idx = arg_idx.ok_or_else(|| "min/max(*) is not supported".to_string())?;
+            let dtype = &schema.columns[idx].dtype;
+            let mut best: Option<Value> = None;
+            for r in rows {
+                let Some(v) = r.get(idx) else { continue };
+                if matches!(v, Value::Null) {
+                    continue;
+                }
+                match &best {
+                    None => best = Some(v.clone()),
+                    Some(cur) => {
+                        let ord = compare_values_for_minmax(cur, v, dtype)?;
+                        if (func == AggregateFn::Min && ord == Ordering::Greater)
+                            || (func == AggregateFn::Max && ord == Ordering::Less)
+                        {
+                            best = Some(v.clone());
+                        }
+                    }
+                }
+            }
+            Ok(best.unwrap_or(Value::Null))
+        }
+    }
+}
+
+fn compare_values_for_minmax(lhs: &Value, rhs: &Value, dtype: &DataType) -> Result<Ordering, String> {
+    match dtype {
+        DataType::Bool => match (lhs, rhs) {
+            (Value::Bool(a), Value::Bool(b)) => Ok(a.cmp(b)),
+            _ => Err("Type mismatch while evaluating min/max(bool)".to_string()),
+        },
+        DataType::VarChar(_) => match (lhs, rhs) {
+            (Value::VarChar(a), Value::VarChar(b)) => Ok(a.cmp(b)),
+            _ => Err("Type mismatch while evaluating min/max(varchar)".to_string()),
+        },
+        DataType::Text => match (lhs, rhs) {
+            (Value::Text(a), Value::Text(b)) => Ok(a.cmp(b)),
+            _ => Err("Type mismatch while evaluating min/max(text)".to_string()),
+        },
+        DataType::Uuid => match (lhs, rhs) {
+            (Value::Uuid(a), Value::Uuid(b)) => Ok(a.cmp(b)),
+            _ => Err("Type mismatch while evaluating min/max(uuid)".to_string()),
+        },
+        DataType::Blob => match (lhs, rhs) {
+            (Value::Blob(a), Value::Blob(b)) => Ok(a.cmp(b)),
+            _ => Err("Type mismatch while evaluating min/max(blob)".to_string()),
+        },
+        DataType::Json => match (lhs, rhs) {
+            (Value::Json(a), Value::Json(b)) => Ok(a.to_string().cmp(&b.to_string())),
+            _ => Err("Type mismatch while evaluating min/max(json)".to_string()),
+        },
+        _ => compare_order(lhs, rhs, dtype),
+    }
 }
 
 fn build_join_rows(

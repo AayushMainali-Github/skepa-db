@@ -2596,4 +2596,93 @@ fn engine_more_order_by_unknown_column_errors() {
     assert!(err.to_lowercase().contains("unknown column"));
 }
 
+#[test]
+fn test_select_group_by_count_star() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (2, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (3, "la")"#).unwrap();
+    let out = db
+        .execute("select city,count(*) from users group by city order by city asc")
+        .unwrap();
+    assert_eq!(out, "city\tcount(*)\nla\t1\nny\t2");
+}
+
+#[test]
+fn test_select_group_by_sum_avg_min_max() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text, age int)").unwrap();
+    db.execute(r#"insert into users values (1, "ny", 10)"#).unwrap();
+    db.execute(r#"insert into users values (2, "ny", 20)"#).unwrap();
+    db.execute(r#"insert into users values (3, "la", 30)"#).unwrap();
+    let out = db
+        .execute("select city,sum(age),avg(age),min(age),max(age) from users group by city order by city asc")
+        .unwrap();
+    assert_eq!(out, "city\tsum(age)\tavg(age)\tmin(age)\tmax(age)\nla\t30\t30\t30\t30\nny\t30\t15\t10\t20");
+}
+
+#[test]
+fn test_select_aggregate_global_no_group_by() {
+    let mut db = test_db();
+    db.execute("create table users (id int, age int)").unwrap();
+    db.execute("insert into users values (1, 10)").unwrap();
+    db.execute("insert into users values (2, 20)").unwrap();
+    let out = db.execute("select count(*),sum(age),avg(age),min(age),max(age) from users").unwrap();
+    assert_eq!(out, "count(*)\tsum(age)\tavg(age)\tmin(age)\tmax(age)\n2\t30\t15\t10\t20");
+}
+
+#[test]
+fn test_select_aggregate_count_column_skips_nulls() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    db.execute("insert into t values (2, null)").unwrap();
+    let out = db.execute("select count(city),count(*) from t").unwrap();
+    assert_eq!(out, "count(city)\tcount(*)\n1\t2");
+}
+
+#[test]
+fn test_select_group_by_requires_non_aggregate_columns_in_group() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    let err = db
+        .execute("select id,count(*) from t group by city")
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("must appear in group by"));
+}
+
+#[test]
+fn test_select_aggregate_rejects_star_projection() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    let err = db
+        .execute("select * from t group by city")
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("cannot be used with group by"));
+}
+
+#[test]
+fn test_select_aggregate_rejects_invalid_sum_type() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    let err = db.execute("select sum(city) from t").unwrap_err();
+    assert!(err.to_lowercase().contains("only valid for int|bigint|decimal"));
+}
+
+#[test]
+fn test_select_group_by_with_where_before_group() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text, age int)").unwrap();
+    db.execute(r#"insert into t values (1, "ny", 10)"#).unwrap();
+    db.execute(r#"insert into t values (2, "ny", 20)"#).unwrap();
+    db.execute(r#"insert into t values (3, "la", 30)"#).unwrap();
+    let out = db
+        .execute("select city,count(*) from t where age gte 20 group by city order by city asc")
+        .unwrap();
+    assert_eq!(out, "city\tcount(*)\nla\t1\nny\t1");
+}
+
 
