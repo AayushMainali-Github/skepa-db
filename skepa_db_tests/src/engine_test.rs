@@ -1790,6 +1790,22 @@ fn test_foreign_key_insert_succeeds_when_parent_exists() {
 }
 
 #[test]
+fn test_foreign_key_insert_succeeds_when_parent_unique_exists() {
+    let mut db = test_db();
+    db.execute("create table users (id int, email text unique)").unwrap();
+    db.execute(
+        "create table orders (id int, user_email text, foreign key(user_email) references users(email))",
+    )
+    .unwrap();
+    db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
+    db.execute(r#"insert into orders values (1, "a@x.com")"#).unwrap();
+    assert_eq!(
+        db.execute("select * from orders").unwrap(),
+        "id\tuser_email\n1\ta@x.com"
+    );
+}
+
+#[test]
 fn test_foreign_key_restrict_blocks_parent_delete() {
     let mut db = test_db();
     db.execute("create table users (id int primary key)").unwrap();
@@ -1797,6 +1813,21 @@ fn test_foreign_key_restrict_blocks_parent_delete() {
         "create table orders (id int, user_id int, foreign key(user_id) references users(id))",
     )
     .unwrap();
+    db.execute("insert into users values (1)").unwrap();
+    db.execute("insert into orders values (1, 1)").unwrap();
+    let err = db.execute("delete from users where id = 1").unwrap_err();
+    assert!(err.to_lowercase().contains("foreign key restrict"));
+}
+
+#[test]
+fn test_foreign_key_restrict_blocks_parent_delete_with_child_secondary_index() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key)").unwrap();
+    db.execute(
+        "create table orders (id int, user_id int, foreign key(user_id) references users(id))",
+    )
+    .unwrap();
+    db.execute("create index on orders (user_id)").unwrap();
     db.execute("insert into users values (1)").unwrap();
     db.execute("insert into orders values (1, 1)").unwrap();
     let err = db.execute("delete from users where id = 1").unwrap_err();

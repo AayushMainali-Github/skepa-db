@@ -1589,7 +1589,6 @@ fn validate_outgoing_foreign_keys(
 ) -> Result<(), String> {
     for fk in &schema.foreign_keys {
         let parent_schema = catalog.schema(&fk.ref_table)?;
-        let parent_rows = storage.scan(&fk.ref_table)?;
         let child_idxs = resolve_cols_to_idxs(schema, &fk.columns)?;
         let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
         if child_idxs
@@ -1598,7 +1597,7 @@ fn validate_outgoing_foreign_keys(
         {
             continue;
         }
-        let found = parent_rows.iter().any(|pr| tuple_eq(row, &child_idxs, pr, &parent_idxs));
+        let found = fk_parent_exists(catalog, storage, &fk.ref_table, parent_schema, row, &child_idxs, &parent_idxs)?;
         if !found {
             return Err(format!(
                 "FOREIGN KEY violation on ({}) references {}({})",
@@ -1623,13 +1622,16 @@ fn validate_restrict_on_parent_delete(
             continue;
         }
         let child_schema = catalog.schema(&child_table)?;
-        let child_rows = storage.scan(&child_table)?;
         let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
         let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
-        if child_rows
-            .iter()
-            .any(|cr| tuple_eq(cr, &child_idxs, parent_row, &parent_idxs))
-        {
+        if fk_child_references_parent(
+            storage,
+            &child_table,
+            child_schema,
+            parent_row,
+            &child_idxs,
+            &parent_idxs,
+        )? {
             return Err(format!(
                 "FOREIGN KEY RESTRICT violation: '{}' is referenced by '{}'",
                 parent_table, child_table
@@ -1656,12 +1658,16 @@ fn validate_restrict_on_parent_update(
                 continue;
             }
             let child_schema = catalog.schema(&child_table)?;
-            let child_rows = storage.scan(&child_table)?;
             let child_idxs = resolve_cols_to_idxs(child_schema, &fk.columns)?;
             let parent_idxs = resolve_cols_to_idxs(parent_schema, &fk.ref_columns)?;
-            let was_referenced = child_rows
-                .iter()
-                .any(|cr| tuple_eq(cr, &child_idxs, old_r, &parent_idxs));
+            let was_referenced = fk_child_references_parent(
+                storage,
+                &child_table,
+                child_schema,
+                old_r,
+                &child_idxs,
+                &parent_idxs,
+            )?;
             if was_referenced && !tuple_eq(old_r, &parent_idxs, new_r, &parent_idxs) {
                 return Err(format!(
                     "FOREIGN KEY RESTRICT violation: '{}' is referenced by '{}'",
@@ -1891,4 +1897,86 @@ fn tuple_eq(a_row: &Row, a_idxs: &[usize], b_row: &Row, b_idxs: &[usize]) -> boo
         .iter()
         .zip(b_idxs.iter())
         .all(|(ai, bi)| a_row.get(*ai) == b_row.get(*bi))
+}
+
+fn fk_parent_exists(
+    _catalog: &Catalog,
+    storage: &dyn StorageEngine,
+    parent_table: &str,
+    parent_schema: &Schema,
+    child_row: &Row,
+    child_idxs: &[usize],
+    parent_idxs: &[usize],
+) -> Result<bool, String> {
+    if child_idxs.len() == 1 && parent_idxs.len() == 1 {
+        let child_idx = child_idxs[0];
+        let parent_idx = parent_idxs[0];
+        if let Some(v) = child_row.get(child_idx) {
+            let tok = value_to_string(v);
+            let parent_col = &parent_schema.columns[parent_idx].name;
+            if parent_schema.primary_key.len() == 1
+                && parent_schema.primary_key.first().is_some_and(|c| c == parent_col)
+                && storage
+                    .lookup_pk_row_index(parent_table, parent_schema, &tok)?
+                    .is_some()
+            {
+                return Ok(true);
+            }
+            if storage
+                .lookup_unique_row_index(parent_table, parent_schema, parent_col, &tok)?
+                .is_some()
+            {
+                return Ok(true);
+            }
+        }
+    }
+
+    let parent_rows = storage.scan(parent_table)?;
+    Ok(parent_rows
+        .iter()
+        .any(|pr| tuple_eq(child_row, child_idxs, pr, parent_idxs)))
+}
+
+fn fk_child_references_parent(
+    storage: &dyn StorageEngine,
+    child_table: &str,
+    child_schema: &Schema,
+    parent_row: &Row,
+    child_idxs: &[usize],
+    parent_idxs: &[usize],
+) -> Result<bool, String> {
+    if child_idxs.len() == 1 && parent_idxs.len() == 1 {
+        let child_idx = child_idxs[0];
+        let parent_idx = parent_idxs[0];
+        if let Some(v) = parent_row.get(parent_idx) {
+            let tok = value_to_string(v);
+            let child_col = &child_schema.columns[child_idx].name;
+
+            if child_schema.primary_key.len() == 1
+                && child_schema.primary_key.first().is_some_and(|c| c == child_col)
+                && storage
+                    .lookup_pk_row_index(child_table, child_schema, &tok)?
+                    .is_some()
+            {
+                return Ok(true);
+            }
+            if storage
+                .lookup_unique_row_index(child_table, child_schema, child_col, &tok)?
+                .is_some()
+            {
+                return Ok(true);
+            }
+            if storage
+                .lookup_secondary_row_indices(child_table, child_schema, child_col, &tok)?
+                .is_some_and(|hits| !hits.is_empty())
+            {
+                return Ok(true);
+            }
+        }
+    }
+
+    let child_rows = storage.scan(child_table)?;
+    Ok(child_rows
+        .iter()
+        .any(|cr| tuple_eq(cr, child_idxs, parent_row, parent_idxs)))
 }
