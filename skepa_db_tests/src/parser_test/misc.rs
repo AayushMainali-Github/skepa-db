@@ -34,53 +34,31 @@ fn where_not_equal_not_supported() {
 }
 
 #[test]
-fn parse_keyword_case_insensitive_create() {
-    let cmd = parse("CrEaTe TaBlE t (id int)").unwrap();
-    match cmd {
-        Command::Create { table, columns, .. } => {
-            assert_eq!(table, "t");
-            assert_eq!(columns.len(), 1);
+fn parse_keyword_case_insensitive_commands() {
+    let cases = [
+        ("CrEaTe TaBlE t (id int)", "create"),
+        (r#"InSeRt InTo t VaLuEs (1)"#, "insert"),
+        ("UpDaTe t SeT a = 1 WhErE id = 2", "update"),
+        ("DeLeTe FrOm t WhErE id = 1", "delete"),
+        ("SeLeCt * FrOm t", "select"),
+    ];
+
+    for (sql, kind) in cases {
+        let cmd = parse(sql).unwrap();
+        match (kind, cmd) {
+            ("create", Command::Create { table, columns, .. }) => {
+                assert_eq!(table, "t");
+                assert_eq!(columns.len(), 1);
+            }
+            ("insert", Command::Insert { table, values }) => {
+                assert_eq!(table, "t");
+                assert_eq!(values, vec!["1"]);
+            }
+            ("update", Command::Update { table, .. }) => assert_eq!(table, "t"),
+            ("delete", Command::Delete { table, .. }) => assert_eq!(table, "t"),
+            ("select", Command::Select { table, .. }) => assert_eq!(table, "t"),
+            _ => panic!("unexpected parse kind/match for {kind}"),
         }
-        _ => panic!("Expected Create command"),
-    }
-}
-
-#[test]
-fn parse_keyword_case_insensitive_insert() {
-    let cmd = parse(r#"InSeRt InTo t VaLuEs (1)"#).unwrap();
-    match cmd {
-        Command::Insert { table, values } => {
-            assert_eq!(table, "t");
-            assert_eq!(values, vec!["1"]);
-        }
-        _ => panic!("Expected Insert command"),
-    }
-}
-
-#[test]
-fn parse_keyword_case_insensitive_update() {
-    let cmd = parse("UpDaTe t SeT a = 1 WhErE id = 2").unwrap();
-    match cmd {
-        Command::Update { table, .. } => assert_eq!(table, "t"),
-        _ => panic!("Expected Update command"),
-    }
-}
-
-#[test]
-fn parse_keyword_case_insensitive_delete() {
-    let cmd = parse("DeLeTe FrOm t WhErE id = 1").unwrap();
-    match cmd {
-        Command::Delete { table, .. } => assert_eq!(table, "t"),
-        _ => panic!("Expected Delete command"),
-    }
-}
-
-#[test]
-fn parse_keyword_case_insensitive_select() {
-    let cmd = parse("SeLeCt * FrOm t").unwrap();
-    match cmd {
-        Command::Select { table, .. } => assert_eq!(table, "t"),
-        _ => panic!("Expected Select command"),
     }
 }
 

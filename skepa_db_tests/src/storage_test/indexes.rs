@@ -342,6 +342,157 @@ fn reopen_select_index_lookup_multiple_values() {
     }
 }
 
+#[test]
+fn secondary_index_snapshot_with_duplicate_key_self_heals() {
+    let path = temp_dir("secondary_dup_key_heal");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int, city text)").unwrap();
+        db.execute("create index on users (city)").unwrap();
+        db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+        db.execute(r#"insert into users values (2, "la")"#).unwrap();
+    }
+
+    std::fs::write(
+        path.join("indexes").join("users.indexes.json"),
+        r#"{
+  "pk": null,
+  "unique": [],
+  "secondary": [
+    { "cols": ["city"], "col_idxs": [1], "entries": [
+      { "key": "2:ny;", "row_ids": [1] },
+      { "key": "2:ny;", "row_ids": [2] }
+    ] }
+  ]
+}"#,
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        let out = db
+            .execute(r#"select * from users where city = "la" order by id asc"#)
+            .unwrap();
+        assert_eq!(out, "id\tcity\n2\tla");
+    }
+}
+
+#[test]
+fn secondary_index_snapshot_with_empty_row_ids_self_heals() {
+    let path = temp_dir("secondary_empty_rowids_heal");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int, city text)").unwrap();
+        db.execute("create index on users (city)").unwrap();
+        db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+    }
+
+    std::fs::write(
+        path.join("indexes").join("users.indexes.json"),
+        r#"{
+  "pk": null,
+  "unique": [],
+  "secondary": [
+    { "cols": ["city"], "col_idxs": [1], "entries": [
+      { "key": "2:ny;", "row_ids": [] }
+    ] }
+  ]
+}"#,
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        let out = db.execute(r#"select * from users where city = "ny""#).unwrap();
+        assert_eq!(out, "id\tcity\n1\tny");
+    }
+}
+
+#[test]
+fn secondary_index_snapshot_with_unknown_row_id_self_heals() {
+    let path = temp_dir("secondary_unknown_rowid_heal");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table users (id int, city text)").unwrap();
+        db.execute("create index on users (city)").unwrap();
+        db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+    }
+
+    std::fs::write(
+        path.join("indexes").join("users.indexes.json"),
+        r#"{
+  "pk": null,
+  "unique": [],
+  "secondary": [
+    { "cols": ["city"], "col_idxs": [1], "entries": [
+      { "key": "2:ny;", "row_ids": [999] }
+    ] }
+  ]
+}"#,
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        let out = db.execute(r#"select * from users where city = "ny""#).unwrap();
+        assert_eq!(out, "id\tcity\n1\tny");
+    }
+}
+
+#[test]
+fn unique_index_snapshot_col_idxs_mismatch_self_heals() {
+    let path = temp_dir("unique_colidx_mismatch_heal");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (id int, email text unique)").unwrap();
+        db.execute(r#"insert into t values (1, "a@x.com")"#).unwrap();
+    }
+
+    std::fs::write(
+        path.join("indexes").join("t.indexes.json"),
+        r#"{
+  "pk": null,
+  "unique": [
+    { "cols": ["email"], "col_idxs": [0], "entries": [ { "key": "7:a@x.com;", "row_id": 1 } ] }
+  ],
+  "secondary": []
+}"#,
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        let out = db.execute(r#"select * from t where email = "a@x.com""#).unwrap();
+        assert_eq!(out, "id\temail\n1\ta@x.com");
+    }
+}
+
+#[test]
+fn pk_index_snapshot_col_idxs_mismatch_self_heals() {
+    let path = temp_dir("pk_colidx_mismatch_heal");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table t (id int primary key, name text)").unwrap();
+        db.execute(r#"insert into t values (1, "a")"#).unwrap();
+    }
+
+    std::fs::write(
+        path.join("indexes").join("t.indexes.json"),
+        r#"{
+  "pk": { "cols": [], "col_idxs": [1], "entries": [ { "key": "1:1;", "row_id": 1 } ] },
+  "unique": [],
+  "secondary": []
+}"#,
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        let out = db.execute("select * from t where id = 1").unwrap();
+        assert_eq!(out, "id\tname\n1\ta");
+    }
+}
+
 
 
 
