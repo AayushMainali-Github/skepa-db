@@ -38,27 +38,27 @@ fn handle_alter(
 ) -> Result<String, String> {
     let before = catalog.clone();
     let result = match action {
-        AlterAction::AddUnique(cols) => {
+        AlterAction::AddUnique(cols) => (|| -> Result<String, String> {
             catalog.add_unique_constraint(&table, cols.clone())?;
             let schema = catalog.schema(&table)?;
             let rows = storage.scan(&table)?;
             validate_all_unique_constraints(schema, rows)?;
             storage.rebuild_indexes(&table, schema)?;
             Ok(format!("altered table {}: added unique({})", table, cols.join(",")))
-        }
-        AlterAction::DropUnique(cols) => {
+        })(),
+        AlterAction::DropUnique(cols) => (|| -> Result<String, String> {
             catalog.drop_unique_constraint(&table, &cols)?;
             let schema = catalog.schema(&table)?;
             storage.rebuild_indexes(&table, schema)?;
             Ok(format!("altered table {}: dropped unique({})", table, cols.join(",")))
-        }
+        })(),
         AlterAction::AddForeignKey {
             columns,
             ref_table,
             ref_columns,
             on_delete,
             on_update,
-        } => {
+        } => (|| -> Result<String, String> {
             catalog.add_foreign_key_constraint(
                 &table,
                 ForeignKeyDef {
@@ -79,12 +79,12 @@ fn handle_alter(
                 ref_table,
                 ref_columns.join(",")
             ))
-        }
+        })(),
         AlterAction::DropForeignKey {
             columns,
             ref_table,
             ref_columns,
-        } => {
+        } => (|| -> Result<String, String> {
             catalog.drop_foreign_key_constraint(&table, &columns, &ref_table, &ref_columns)?;
             Ok(format!(
                 "altered table {}: dropped foreign key({}) references {}({})",
@@ -93,18 +93,18 @@ fn handle_alter(
                 ref_table,
                 ref_columns.join(",")
             ))
-        }
-        AlterAction::SetNotNull(col) => {
+        })(),
+        AlterAction::SetNotNull(col) => (|| -> Result<String, String> {
             catalog.set_not_null(&table, &col, true)?;
             let schema = catalog.schema(&table)?;
             let rows = storage.scan(&table)?;
             validate_not_null_columns(schema, rows)?;
             Ok(format!("altered table {}: set {} not null", table, col))
-        }
-        AlterAction::DropNotNull(col) => {
+        })(),
+        AlterAction::DropNotNull(col) => (|| -> Result<String, String> {
             catalog.set_not_null(&table, &col, false)?;
             Ok(format!("altered table {}: dropped not null on {}", table, col))
-        }
+        })(),
     };
     if result.is_err() {
         *catalog = before;

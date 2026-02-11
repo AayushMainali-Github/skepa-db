@@ -30,3 +30,20 @@ fn test_secondary_index_select_update_delete_eq_paths() {
     assert_eq!(db.execute("select * from users").unwrap(), "id\tcity\tage\n3\tla\t30");
 }
 
+#[test]
+fn test_create_duplicate_secondary_index_errors() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute("create index on users (city)").unwrap();
+    let err = db.execute("create index on users (city)").unwrap_err();
+    assert!(err.to_lowercase().contains("already exists"));
+}
+
+#[test]
+fn test_drop_missing_secondary_index_errors() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    let err = db.execute("drop index on users (city)").unwrap_err();
+    assert!(err.to_lowercase().contains("does not exist"));
+}
+

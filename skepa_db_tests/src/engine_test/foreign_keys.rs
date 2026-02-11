@@ -430,6 +430,43 @@ fn test_foreign_key_no_action_commit_fails_if_still_violated() {
 }
 
 #[test]
+fn test_foreign_key_no_action_delete_deferred_until_commit_can_be_fixed_in_tx() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on delete no action)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("delete from p where id = 1").unwrap();
+    db.execute("delete from c where id = 1").unwrap();
+    let out = db.execute("commit").unwrap();
+    assert_eq!(out, "transaction committed");
+    assert_eq!(db.execute("select * from p").unwrap(), "id");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid");
+}
+
+#[test]
+fn test_foreign_key_no_action_delete_commit_fails_if_still_violated() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int, foreign key(pid) references p(id) on delete no action)")
+        .unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 1)").unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("delete from p where id = 1").unwrap();
+    let err = db.execute("commit").unwrap_err();
+    assert!(err.to_lowercase().contains("no action"));
+
+    // Commit failure should restore previous consistent state.
+    assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n1\t1");
+}
+
+#[test]
 fn test_foreign_key_insert_with_null_child_key_is_allowed() {
     let mut db = test_db();
     db.execute("create table p (id int primary key)").unwrap();

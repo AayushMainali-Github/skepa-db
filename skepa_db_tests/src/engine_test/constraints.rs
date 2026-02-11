@@ -407,3 +407,42 @@ fn test_unique_composite_allows_multiple_rows_with_null_member() {
     assert_eq!(db.execute("select * from t").unwrap(), "a\tb\n1\tnull\n1\tnull");
 }
 
+#[test]
+fn test_alter_add_unique_failure_rolls_back_catalog_state() {
+    let mut db = test_db();
+    db.execute("create table t (id int, email text)").unwrap();
+    db.execute(r#"insert into t values (1, "dup@x.com")"#).unwrap();
+    db.execute(r#"insert into t values (2, "dup@x.com")"#).unwrap();
+
+    let err = db.execute("alter table t add unique(email)").unwrap_err();
+    assert!(err.to_lowercase().contains("unique"));
+
+    // UNIQUE must not remain partially applied after failed ALTER.
+    db.execute(r#"insert into t values (3, "dup@x.com")"#).unwrap();
+    assert_eq!(
+        db.execute("select id from t order by id asc").unwrap(),
+        "id\n1\n2\n3"
+    );
+}
+
+#[test]
+fn test_alter_add_fk_failure_rolls_back_catalog_state() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (1, 999)").unwrap();
+
+    let err = db
+        .execute("alter table c add foreign key(pid) references p(id)")
+        .unwrap_err();
+    assert!(err.to_lowercase().contains("foreign key"));
+
+    // FK must not remain partially applied after failed ALTER.
+    db.execute("insert into c values (2, 888)").unwrap();
+    assert_eq!(
+        db.execute("select id,pid from c order by id asc").unwrap(),
+        "id\tpid\n1\t999\n2\t888"
+    );
+}
+
