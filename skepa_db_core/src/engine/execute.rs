@@ -581,6 +581,9 @@ fn evaluate_grouped_select(
         let (sel_expr, sel_alias) = split_select_alias(sel);
         if let Some((agg_fn, arg, is_distinct)) = parse_aggregate_expr_extended(&sel_expr) {
             has_agg = true;
+            if is_distinct && arg == "*" {
+                return Err("DISTINCT with '*' is not supported in aggregates".to_string());
+            }
             let (dtype, arg_idx_opt) = if arg == "*" {
                 (DataType::BigInt, None)
             } else {
@@ -732,25 +735,7 @@ fn evaluate_single_aggregate(
     match func {
         AggregateFn::Count => {
             let cnt = if let Some(idx) = arg_idx {
-                if is_distinct {
-                    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-                    let mut c = 0i128;
-                    for r in rows {
-                        let Some(v) = r.get(idx) else { continue };
-                        if matches!(v, Value::Null) {
-                            continue;
-                        }
-                        let k = value_to_string(v);
-                        if seen.insert(k) {
-                            c += 1;
-                        }
-                    }
-                    c
-                } else {
-                    rows.iter()
-                        .filter(|r| !matches!(r.get(idx), Some(Value::Null)))
-                        .count() as i128
-                }
+                aggregate_input_values(rows, idx, is_distinct).len() as i128
             } else {
                 rows.len() as i128
             };
@@ -758,11 +743,12 @@ fn evaluate_single_aggregate(
         }
         AggregateFn::Sum => {
             let idx = arg_idx.ok_or_else(|| "sum(*) is not supported".to_string())?;
+            let vals = aggregate_input_values(rows, idx, is_distinct);
             match &schema.columns[idx].dtype {
                 DataType::Int => {
                     let mut acc: i64 = 0;
-                    for r in rows {
-                        if let Some(Value::Int(v)) = r.get(idx) {
+                    for v in &vals {
+                        if let Value::Int(v) = v {
                             acc = acc
                                 .checked_add(*v)
                                 .ok_or_else(|| "sum(int) overflow".to_string())?;
@@ -772,8 +758,8 @@ fn evaluate_single_aggregate(
                 }
                 DataType::BigInt => {
                     let mut acc: i128 = 0;
-                    for r in rows {
-                        if let Some(Value::BigInt(v)) = r.get(idx) {
+                    for v in &vals {
+                        if let Value::BigInt(v) = v {
                             acc = acc
                                 .checked_add(*v)
                                 .ok_or_else(|| "sum(bigint) overflow".to_string())?;
@@ -783,8 +769,8 @@ fn evaluate_single_aggregate(
                 }
                 DataType::Decimal { .. } => {
                     let mut acc = Decimal::ZERO;
-                    for r in rows {
-                        if let Some(Value::Decimal(v)) = r.get(idx) {
+                    for v in &vals {
+                        if let Value::Decimal(v) = v {
                             acc += *v;
                         }
                     }
@@ -795,28 +781,29 @@ fn evaluate_single_aggregate(
         }
         AggregateFn::Avg => {
             let idx = arg_idx.ok_or_else(|| "avg(*) is not supported".to_string())?;
+            let vals = aggregate_input_values(rows, idx, is_distinct);
             let mut cnt: i128 = 0;
             let mut acc = Decimal::ZERO;
             match &schema.columns[idx].dtype {
                 DataType::Int => {
-                    for r in rows {
-                        if let Some(Value::Int(v)) = r.get(idx) {
+                    for v in &vals {
+                        if let Value::Int(v) = v {
                             acc += Decimal::from(*v);
                             cnt += 1;
                         }
                     }
                 }
                 DataType::BigInt => {
-                    for r in rows {
-                        if let Some(Value::BigInt(v)) = r.get(idx) {
+                    for v in &vals {
+                        if let Value::BigInt(v) = v {
                             acc += Decimal::from_i128_with_scale(*v, 0);
                             cnt += 1;
                         }
                     }
                 }
                 DataType::Decimal { .. } => {
-                    for r in rows {
-                        if let Some(Value::Decimal(v)) = r.get(idx) {
+                    for v in &vals {
+                        if let Value::Decimal(v) = v {
                             acc += *v;
                             cnt += 1;
                         }
@@ -833,15 +820,11 @@ fn evaluate_single_aggregate(
             let idx = arg_idx.ok_or_else(|| "min/max(*) is not supported".to_string())?;
             let dtype = &schema.columns[idx].dtype;
             let mut best: Option<Value> = None;
-            for r in rows {
-                let Some(v) = r.get(idx) else { continue };
-                if matches!(v, Value::Null) {
-                    continue;
-                }
+            for v in aggregate_input_values(rows, idx, is_distinct) {
                 match &best {
                     None => best = Some(v.clone()),
                     Some(cur) => {
-                        let ord = compare_values_for_minmax(cur, v, dtype)?;
+                        let ord = compare_values_for_minmax(cur, &v, dtype)?;
                         if (func == AggregateFn::Min && ord == Ordering::Greater)
                             || (func == AggregateFn::Max && ord == Ordering::Less)
                         {
@@ -853,6 +836,33 @@ fn evaluate_single_aggregate(
             Ok(best.unwrap_or(Value::Null))
         }
     }
+}
+
+fn aggregate_input_values(rows: &[Row], idx: usize, distinct: bool) -> Vec<Value> {
+    if !distinct {
+        let mut out: Vec<Value> = Vec::new();
+        for r in rows {
+            if let Some(v) = r.get(idx) {
+                if !matches!(v, Value::Null) {
+                    out.push(v.clone());
+                }
+            }
+        }
+        return out;
+    }
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<Value> = Vec::new();
+    for r in rows {
+        let Some(v) = r.get(idx) else { continue };
+        if matches!(v, Value::Null) {
+            continue;
+        }
+        let key = value_to_string(v);
+        if seen.insert(key) {
+            out.push(v.clone());
+        }
+    }
+    out
 }
 
 fn compare_values_for_minmax(lhs: &Value, rhs: &Value, dtype: &DataType) -> Result<Ordering, String> {

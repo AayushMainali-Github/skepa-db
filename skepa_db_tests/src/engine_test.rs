@@ -2655,6 +2655,43 @@ fn test_select_aggregate_count_distinct_global() {
 }
 
 #[test]
+fn test_select_aggregate_sum_avg_distinct_global() {
+    let mut db = test_db();
+    db.execute("create table t (vi int, vd decimal(10,2))").unwrap();
+    db.execute("insert into t values (10, 1.00)").unwrap();
+    db.execute("insert into t values (10, 1.00)").unwrap();
+    db.execute("insert into t values (20, 2.00)").unwrap();
+    db.execute("insert into t values (null, null)").unwrap();
+    let out = db
+        .execute("select sum(distinct vi),sum(vi),avg(distinct vd) from t")
+        .unwrap();
+    assert_eq!(out, "sum(distinct vi)\tsum(vi)\tavg(distinct vd)\n30\t40\t1.5");
+}
+
+#[test]
+fn test_select_aggregate_min_max_distinct_global() {
+    let mut db = test_db();
+    db.execute("create table t (city text)").unwrap();
+    db.execute(r#"insert into t values ("ny")"#).unwrap();
+    db.execute(r#"insert into t values ("ny")"#).unwrap();
+    db.execute(r#"insert into t values ("la")"#).unwrap();
+    db.execute("insert into t values (null)").unwrap();
+    let out = db
+        .execute("select min(distinct city),max(distinct city),min(city),max(city) from t")
+        .unwrap();
+    assert_eq!(out, "min(distinct city)\tmax(distinct city)\tmin(city)\tmax(city)\nla\tny\tla\tny");
+}
+
+#[test]
+fn test_select_aggregate_distinct_star_errors() {
+    let mut db = test_db();
+    db.execute("create table t (id int)").unwrap();
+    db.execute("insert into t values (1)").unwrap();
+    let err = db.execute("select count(distinct *) from t").unwrap_err();
+    assert!(err.to_lowercase().contains("distinct") && err.contains("*"));
+}
+
+#[test]
 fn test_select_aggregate_count_distinct_group_by() {
     let mut db = test_db();
     db.execute("create table t (city text, name text)").unwrap();

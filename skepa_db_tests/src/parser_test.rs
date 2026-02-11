@@ -1831,6 +1831,17 @@ fn parse_select_count_distinct_without_group_by() {
 }
 
 #[test]
+fn parse_select_sum_distinct_without_group_by() {
+    let cmd = parse("select sum(distinct age) from users").unwrap();
+    match cmd {
+        Command::Select { columns, .. } => {
+            assert_eq!(columns.unwrap(), vec!["sum(distinct age)"]);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
 fn parse_select_count_distinct_with_group_by_having() {
     let cmd = parse(
         "select city,count(distinct name) from users group by city having count(distinct name) gt 0",
