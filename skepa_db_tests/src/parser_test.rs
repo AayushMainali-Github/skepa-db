@@ -1904,6 +1904,34 @@ fn parse_select_duplicate_limit_or_offset_errors() {
     assert!(parse("select * from users offset 1 offset 2").is_err());
 }
 
+#[test]
+fn parse_select_with_aliases() {
+    let cmd = parse("select id as uid,name as uname from users").unwrap();
+    match cmd {
+        Command::Select { columns, .. } => {
+            assert_eq!(
+                columns.unwrap(),
+                vec!["id as uid".to_string(), "name as uname".to_string()]
+            );
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_order_by_alias() {
+    let cmd = parse("select city,count(*) as c from users group by city order by c desc").unwrap();
+    match cmd {
+        Command::Select { columns, order_by, .. } => {
+            assert_eq!(columns.unwrap(), vec!["city".to_string(), "count(*) as c".to_string()]);
+            let ob = order_by.expect("order by");
+            assert_eq!(ob.column, "c");
+            assert!(!ob.asc);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
 
 
 

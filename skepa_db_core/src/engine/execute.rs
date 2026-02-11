@@ -387,13 +387,41 @@ fn handle_select(
 
     let mut ordered_rows = filtered_rows;
     if let Some(ob) = order_by {
+        let mut alias_to_idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        if let Some(req_cols) = columns.as_ref() {
+            for item in req_cols {
+                let (expr, alias) = split_select_alias(item);
+                if let Some(a) = alias {
+                    if let Ok(idx) = resolve_column_index(&select_schema, &expr, "SELECT list") {
+                        alias_to_idx.insert(a, idx);
+                    }
+                }
+            }
+        }
         let mut criteria: Vec<(usize, bool)> = Vec::new();
-        criteria.push((
-            resolve_column_index(&select_schema, &ob.column, "ORDER BY")?,
-            ob.asc,
-        ));
+        let first_idx = resolve_column_index(&select_schema, &ob.column, "ORDER BY").or_else(|e| {
+            if e.contains("Unknown column") {
+                alias_to_idx
+                    .get(&ob.column)
+                    .copied()
+                    .ok_or_else(|| format!("Unknown column '{}' in ORDER BY", ob.column))
+            } else {
+                Err(e)
+            }
+        })?;
+        criteria.push((first_idx, ob.asc));
         for (col, asc) in ob.then_by {
-            criteria.push((resolve_column_index(&select_schema, &col, "ORDER BY")?, asc));
+            let idx = resolve_column_index(&select_schema, &col, "ORDER BY").or_else(|e| {
+                if e.contains("Unknown column") {
+                    alias_to_idx
+                        .get(&col)
+                        .copied()
+                        .ok_or_else(|| format!("Unknown column '{}' in ORDER BY", col))
+                } else {
+                    Err(e)
+                }
+            })?;
+            criteria.push((idx, asc));
         }
         ordered_rows.sort_by(|a, b| {
             for (idx, asc) in &criteria {
@@ -436,7 +464,8 @@ fn has_group_or_aggregate(columns: Option<&Vec<String>>, group_by: Option<&Vec<S
     let Some(cols) = columns else {
         return false;
     };
-    cols.iter().any(|c| parse_aggregate_expr(c).is_some())
+    cols.iter()
+        .any(|c| parse_aggregate_expr(&split_select_alias(c).0).is_some())
 }
 
 fn parse_aggregate_expr(token: &str) -> Option<(AggregateFn, String)> {
@@ -480,7 +509,8 @@ fn evaluate_grouped_select(
     // (is_agg, source_idx_for_plain, agg meta)
     let mut has_agg = false;
     for sel in select_cols {
-        if let Some((agg_fn, arg)) = parse_aggregate_expr(sel) {
+        let (sel_expr, sel_alias) = split_select_alias(sel);
+        if let Some((agg_fn, arg)) = parse_aggregate_expr(&sel_expr) {
             has_agg = true;
             let (dtype, arg_idx_opt) = if arg == "*" {
                 (DataType::BigInt, None)
@@ -491,7 +521,7 @@ fn evaluate_grouped_select(
                 (out_dtype, Some(idx))
             };
             output_columns.push(Column {
-                name: sel.clone(),
+                name: sel_alias.unwrap_or_else(|| sel_expr.clone()),
                 dtype,
                 primary_key: false,
                 unique: false,
@@ -499,14 +529,18 @@ fn evaluate_grouped_select(
             });
             select_items.push((true, 0usize, Some((agg_fn, arg_idx_opt.unwrap_or(usize::MAX)))));
         } else {
-            let idx = resolve_column_index(schema, sel, "SELECT list")?;
+            let idx = resolve_column_index(schema, &sel_expr, "SELECT list")?;
             if !group_key_indices.contains(&idx) {
                 return Err(format!(
                     "Column '{}' must appear in GROUP BY or be used in an aggregate function",
-                    sel
+                    sel_expr
                 ));
             }
-            output_columns.push(schema.columns[idx].clone());
+            let mut out_col = schema.columns[idx].clone();
+            if let Some(alias) = sel_alias {
+                out_col.name = alias;
+            }
+            output_columns.push(out_col);
             select_items.push((false, idx, None));
         }
     }
@@ -1121,8 +1155,13 @@ fn project_rows(
 
     let mut selected: Vec<(usize, Column)> = Vec::new();
     for name in requested_columns {
-        let idx = resolve_column_index(schema, name, "SELECT list")?;
-        selected.push((idx, schema.columns[idx].clone()));
+        let (expr, alias) = split_select_alias(name);
+        let idx = resolve_column_index(schema, &expr, "SELECT list")?;
+        let mut out_col = schema.columns[idx].clone();
+        if let Some(a) = alias {
+            out_col.name = a;
+        }
+        selected.push((idx, out_col));
     }
 
     let projected_schema = Schema::new(selected.iter().map(|(_, c)| c.clone()).collect());
@@ -1137,6 +1176,18 @@ fn project_rows(
         .collect();
 
     Ok((projected_schema, projected_rows))
+}
+
+fn split_select_alias(token: &str) -> (String, Option<String>) {
+    let lower = token.to_lowercase();
+    if let Some(pos) = lower.rfind(" as ") {
+        let expr = token[..pos].trim();
+        let alias = token[pos + 4..].trim();
+        if !expr.is_empty() && !alias.is_empty() {
+            return (expr.to_string(), Some(alias.to_string()));
+        }
+    }
+    (token.trim().to_string(), None)
 }
 
 fn filter_rows(

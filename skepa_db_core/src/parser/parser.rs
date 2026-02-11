@@ -752,16 +752,26 @@ fn parse_select_columns(tokens: &[String]) -> Result<Vec<String>, String> {
                     .to_string(),
             );
         }
-        if i + 1 < tokens.len() && tokens[i + 1] == "(" {
+        let mut expr = if i + 1 < tokens.len() && tokens[i + 1] == "(" {
             if i + 3 >= tokens.len() || tokens[i + 3] != ")" {
                 return Err("Bad SELECT function syntax. Use fn(col) or fn(*)".to_string());
             }
-            columns.push(format!("{}({})", tokens[i], tokens[i + 2]));
+            let e = format!("{}({})", tokens[i], tokens[i + 2]);
             i += 4;
+            e
         } else {
-            columns.push(tokens[i].clone());
+            let e = tokens[i].clone();
             i += 1;
+            e
+        };
+        if i < tokens.len() && tokens[i].eq_ignore_ascii_case("as") {
+            if i + 1 >= tokens.len() || tokens[i + 1] == "," {
+                return Err("Bad SELECT alias syntax. Use: <expr> as <alias>".to_string());
+            }
+            expr = format!("{expr} as {}", tokens[i + 1]);
+            i += 2;
         }
+        columns.push(expr);
         if i < tokens.len() {
             if tokens[i] != "," {
                 return Err("Bad SELECT column list. Use comma-separated column names.".to_string());

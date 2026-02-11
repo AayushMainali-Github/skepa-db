@@ -2785,6 +2785,35 @@ fn test_select_offset_then_limit() {
 }
 
 #[test]
+fn test_select_projection_alias_headers() {
+    let mut db = test_db();
+    seed_users_3(&mut db);
+    let out = db.execute("select id as uid,name as uname from users order by id asc").unwrap();
+    assert_eq!(out, "uid\tuname\n1\ta\n2\tb\n3\tc");
+}
+
+#[test]
+fn test_select_order_by_non_grouped_alias() {
+    let mut db = test_db();
+    seed_users_3(&mut db);
+    let out = db.execute("select id as uid,name from users order by uid desc").unwrap();
+    assert_eq!(out, "uid\tname\n3\tc\n2\tb\n1\ta");
+}
+
+#[test]
+fn test_select_order_by_grouped_alias() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (2, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (3, "la")"#).unwrap();
+    let out = db
+        .execute("select city,count(*) as c from t group by city order by c desc")
+        .unwrap();
+    assert_eq!(out, "city\tc\nny\t2\nla\t1");
+}
+
+#[test]
 fn test_select_offset_with_grouped_result() {
     let mut db = test_db();
     db.execute("create table t (id int, city text)").unwrap();
