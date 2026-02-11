@@ -534,6 +534,26 @@ fn parse_aggregate_expr(token: &str) -> Option<(AggregateFn, String)> {
     Some((func, arg.to_string()))
 }
 
+fn parse_aggregate_expr_extended(token: &str) -> Option<(AggregateFn, String, bool)> {
+    let (func, arg) = parse_aggregate_expr(token)?;
+    let lower = arg.to_lowercase();
+    if let Some(rest) = lower.strip_prefix("distinct ") {
+        let original_rest = arg[("distinct ".len())..].trim().to_string();
+        if rest.trim().is_empty() {
+            return None;
+        }
+        return Some((func, original_rest, true));
+    }
+    Some((func, arg, false))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AggregateMeta {
+    func: AggregateFn,
+    arg_idx: Option<usize>,
+    distinct: bool,
+}
+
 fn evaluate_grouped_select(
     schema: &Schema,
     rows: &[Row],
@@ -554,12 +574,12 @@ fn evaluate_grouped_select(
     }
 
     let mut output_columns: Vec<Column> = Vec::new();
-    let mut select_items: Vec<(bool, usize, Option<(AggregateFn, usize)>)> = Vec::new();
+    let mut select_items: Vec<(bool, usize, Option<AggregateMeta>)> = Vec::new();
     // (is_agg, source_idx_for_plain, agg meta)
     let mut has_agg = false;
     for sel in select_cols {
         let (sel_expr, sel_alias) = split_select_alias(sel);
-        if let Some((agg_fn, arg)) = parse_aggregate_expr(&sel_expr) {
+        if let Some((agg_fn, arg, is_distinct)) = parse_aggregate_expr_extended(&sel_expr) {
             has_agg = true;
             let (dtype, arg_idx_opt) = if arg == "*" {
                 (DataType::BigInt, None)
@@ -576,7 +596,15 @@ fn evaluate_grouped_select(
                 unique: false,
                 not_null: false,
             });
-            select_items.push((true, 0usize, Some((agg_fn, arg_idx_opt.unwrap_or(usize::MAX)))));
+            select_items.push((
+                true,
+                0usize,
+                Some(AggregateMeta {
+                    func: agg_fn,
+                    arg_idx: arg_idx_opt,
+                    distinct: is_distinct,
+                }),
+            ));
         } else {
             let idx = resolve_column_index(schema, &sel_expr, "SELECT list")?;
             if !group_key_indices.contains(&idx) {
@@ -619,7 +647,7 @@ fn evaluate_aggregate_groups(
     schema: &Schema,
     rows: &[Row],
     group_indices: &[usize],
-    select_items: &[(bool, usize, Option<(AggregateFn, usize)>)],
+    select_items: &[(bool, usize, Option<AggregateMeta>)],
     out_schema: Schema,
 ) -> Result<(Schema, Vec<Row>), String> {
     let mut grouped: std::collections::HashMap<String, Vec<Row>> = std::collections::HashMap::new();
@@ -656,13 +684,8 @@ fn evaluate_aggregate_groups(
                 out.push(first[*source_idx].clone());
                 continue;
             }
-            let (agg_fn, arg_idx) = agg_meta.expect("aggregate metadata");
-            let arg_opt = if arg_idx == usize::MAX {
-                None
-            } else {
-                Some(arg_idx)
-            };
-            let v = evaluate_single_aggregate(schema, group_rows, agg_fn, arg_opt)?;
+            let meta = agg_meta.expect("aggregate metadata");
+            let v = evaluate_single_aggregate(schema, group_rows, meta)?;
             out.push(v);
         }
         out_rows.push(out);
@@ -701,15 +724,33 @@ fn aggregate_output_type(func: AggregateFn, dtype: &DataType) -> Result<DataType
 fn evaluate_single_aggregate(
     schema: &Schema,
     rows: &[Row],
-    func: AggregateFn,
-    arg_idx: Option<usize>,
+    meta: AggregateMeta,
 ) -> Result<Value, String> {
+    let func = meta.func;
+    let arg_idx = meta.arg_idx;
+    let is_distinct = meta.distinct;
     match func {
         AggregateFn::Count => {
             let cnt = if let Some(idx) = arg_idx {
-                rows.iter()
-                    .filter(|r| !matches!(r.get(idx), Some(Value::Null)))
-                    .count() as i128
+                if is_distinct {
+                    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+                    let mut c = 0i128;
+                    for r in rows {
+                        let Some(v) = r.get(idx) else { continue };
+                        if matches!(v, Value::Null) {
+                            continue;
+                        }
+                        let k = value_to_string(v);
+                        if seen.insert(k) {
+                            c += 1;
+                        }
+                    }
+                    c
+                } else {
+                    rows.iter()
+                        .filter(|r| !matches!(r.get(idx), Some(Value::Null)))
+                        .count() as i128
+                }
             } else {
                 rows.len() as i128
             };

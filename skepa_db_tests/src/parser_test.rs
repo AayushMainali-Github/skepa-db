@@ -1820,6 +1820,45 @@ fn parse_select_aggregate_without_group_by() {
 }
 
 #[test]
+fn parse_select_count_distinct_without_group_by() {
+    let cmd = parse("select count(distinct city) from users").unwrap();
+    match cmd {
+        Command::Select { columns, .. } => {
+            assert_eq!(columns.unwrap(), vec!["count(distinct city)"]);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_count_distinct_with_group_by_having() {
+    let cmd = parse(
+        "select city,count(distinct name) from users group by city having count(distinct name) gt 0",
+    )
+    .unwrap();
+    match cmd {
+        Command::Select {
+            columns,
+            group_by,
+            having,
+            ..
+        } => {
+            assert_eq!(
+                columns.unwrap(),
+                vec!["city".to_string(), "count(distinct name)".to_string()]
+            );
+            assert_eq!(group_by.expect("group by"), vec!["city"]);
+            let hv = having.expect("having");
+            let p = pred(&hv);
+            assert_eq!(p.column, "count(distinct name)");
+            assert_eq!(p.op, CompareOp::Gt);
+            assert_eq!(p.value, "0");
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
 fn parse_select_group_by_missing_by_errors() {
     assert!(parse("select city from users group city").is_err());
 }

@@ -2643,6 +2643,51 @@ fn test_select_aggregate_count_column_skips_nulls() {
 }
 
 #[test]
+fn test_select_aggregate_count_distinct_global() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (2, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (3, "la")"#).unwrap();
+    db.execute("insert into t values (4, null)").unwrap();
+    let out = db.execute("select count(distinct city),count(city),count(*) from t").unwrap();
+    assert_eq!(out, "count(distinct city)\tcount(city)\tcount(*)\n2\t3\t4");
+}
+
+#[test]
+fn test_select_aggregate_count_distinct_group_by() {
+    let mut db = test_db();
+    db.execute("create table t (city text, name text)").unwrap();
+    db.execute(r#"insert into t values ("ny", "ram")"#).unwrap();
+    db.execute(r#"insert into t values ("ny", "ram")"#).unwrap();
+    db.execute(r#"insert into t values ("ny", "avi")"#).unwrap();
+    db.execute(r#"insert into t values ("la", "sam")"#).unwrap();
+    db.execute("insert into t values (\"la\", null)").unwrap();
+    let out = db
+        .execute(
+            "select city,count(distinct name) from t group by city order by city asc",
+        )
+        .unwrap();
+    assert_eq!(out, "city\tcount(distinct name)\nla\t1\nny\t2");
+}
+
+#[test]
+fn test_select_having_count_distinct_filters_groups() {
+    let mut db = test_db();
+    db.execute("create table t (city text, name text)").unwrap();
+    db.execute(r#"insert into t values ("ny", "ram")"#).unwrap();
+    db.execute(r#"insert into t values ("ny", "avi")"#).unwrap();
+    db.execute(r#"insert into t values ("la", "sam")"#).unwrap();
+    db.execute(r#"insert into t values ("la", "sam")"#).unwrap();
+    let out = db
+        .execute(
+            "select city,count(distinct name) from t group by city having count(distinct name) gt 1 order by city asc",
+        )
+        .unwrap();
+    assert_eq!(out, "city\tcount(distinct name)\nny\t2");
+}
+
+#[test]
 fn test_select_group_by_requires_non_aggregate_columns_in_group() {
     let mut db = test_db();
     db.execute("create table t (id int, city text)").unwrap();

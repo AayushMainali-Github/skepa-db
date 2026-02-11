@@ -701,9 +701,29 @@ fn parse_order_by_list(tokens: &[String], mut i: usize) -> Result<(OrderBy, usiz
         if i >= tokens.len() {
             return Err("ORDER BY requires at least one column".to_string());
         }
-        let col = if i + 3 < tokens.len() && tokens[i + 1] == "(" && tokens[i + 3] == ")" {
-            let c = format!("{}({})", tokens[i], tokens[i + 2]);
-            i += 4;
+        let col = if i + 1 < tokens.len() && tokens[i + 1] == "(" {
+            let mut depth = 0usize;
+            let mut j = i + 1;
+            while j < tokens.len() {
+                if tokens[j] == "(" {
+                    depth += 1;
+                } else if tokens[j] == ")" {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            if j >= tokens.len() || tokens[j] != ")" {
+                return Err("Bad ORDER BY function syntax".to_string());
+            }
+            let args = tokens[i + 2..j].join(" ");
+            if args.trim().is_empty() {
+                return Err("Bad ORDER BY function syntax".to_string());
+            }
+            let c = format!("{}({})", tokens[i], args);
+            i = j + 1;
             c
         } else {
             let c = tokens[i].clone();
@@ -761,11 +781,31 @@ fn parse_select_columns(tokens: &[String]) -> Result<Vec<String>, String> {
             );
         }
         let mut expr = if i + 1 < tokens.len() && tokens[i + 1] == "(" {
-            if i + 3 >= tokens.len() || tokens[i + 3] != ")" {
-                return Err("Bad SELECT function syntax. Use fn(col) or fn(*)".to_string());
+            let mut depth = 0usize;
+            let mut j = i + 1;
+            while j < tokens.len() {
+                if tokens[j] == "(" {
+                    depth += 1;
+                } else if tokens[j] == ")" {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                j += 1;
             }
-            let e = format!("{}({})", tokens[i], tokens[i + 2]);
-            i += 4;
+            if j >= tokens.len() || tokens[j] != ")" {
+                return Err("Bad SELECT function syntax. Use fn(col), fn(distinct col), or fn(*)".to_string());
+            }
+            let arg_tokens = &tokens[i + 2..j];
+            if arg_tokens.is_empty() {
+                return Err("Bad SELECT function syntax. Use fn(col), fn(distinct col), or fn(*)".to_string());
+            }
+            if arg_tokens[0].eq_ignore_ascii_case("distinct") && arg_tokens.len() < 2 {
+                return Err("Bad SELECT function syntax. DISTINCT requires a column".to_string());
+            }
+            let e = format!("{}({})", tokens[i], arg_tokens.join(" "));
+            i = j + 1;
             e
         } else {
             let e = tokens[i].clone();
@@ -995,9 +1035,25 @@ fn normalize_function_tokens(tokens: &[String]) -> Result<Vec<String>, String> {
     let mut out: Vec<String> = Vec::new();
     let mut i = 0usize;
     while i < tokens.len() {
-        if i + 3 < tokens.len() && tokens[i + 1] == "(" && tokens[i + 3] == ")" {
-            out.push(format!("{}({})", tokens[i], tokens[i + 2]));
-            i += 4;
+        if i + 1 < tokens.len() && tokens[i + 1] == "(" {
+            let mut depth = 0usize;
+            let mut j = i + 1;
+            while j < tokens.len() {
+                if tokens[j] == "(" {
+                    depth += 1;
+                } else if tokens[j] == ")" {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            if j >= tokens.len() || tokens[j] != ")" {
+                return Err("Bad function syntax in expression".to_string());
+            }
+            out.push(format!("{}({})", tokens[i], tokens[i + 2..j].join(" ")));
+            i = j + 1;
         } else {
             out.push(tokens[i].clone());
             i += 1;
