@@ -525,6 +525,13 @@ fn parse_select(tokens: &[String]) -> Result<Command, String> {
 }
 
 fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
+    let mut distinct = false;
+    let projection_start = if tokens.len() > 1 && tokens[1].eq_ignore_ascii_case("distinct") {
+        distinct = true;
+        2
+    } else {
+        1
+    };
     let from_idx = tokens
         .iter()
         .position(|t| t.eq_ignore_ascii_case("from"))
@@ -532,13 +539,13 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
             "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>]".to_string()
         })?;
 
-    if tokens.len() < 4 || from_idx < 2 {
+    if tokens.len() < 4 || from_idx <= projection_start {
         return Err(
             "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>]".to_string(),
         );
     }
 
-    let columns = parse_select_columns(&tokens[1..from_idx])?;
+    let columns = parse_select_columns(&tokens[projection_start..from_idx])?;
     if from_idx + 1 >= tokens.len() {
         return Err("SELECT missing table name after FROM".to_string());
     }
@@ -676,6 +683,7 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
 
     Ok(Command::Select {
         table,
+        distinct,
         join,
         columns: Some(columns),
         filter,

@@ -1932,6 +1932,18 @@ fn parse_select_order_by_alias() {
     }
 }
 
+#[test]
+fn parse_select_distinct_basic() {
+    let cmd = parse("select distinct city from users").unwrap();
+    match cmd {
+        Command::Select { distinct, columns, .. } => {
+            assert!(distinct);
+            assert_eq!(columns.unwrap(), vec!["city".to_string()]);
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
 
 
 

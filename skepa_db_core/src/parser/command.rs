@@ -155,6 +155,7 @@ pub enum Command {
 
     Select {
         table: String,
+        distinct: bool,
         join: Option<JoinClause>,
         columns: Option<Vec<String>>,
         filter: Option<WhereClause>,

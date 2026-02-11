@@ -2814,6 +2814,40 @@ fn test_select_order_by_grouped_alias() {
 }
 
 #[test]
+fn test_select_distinct_single_column() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (2, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (3, "la")"#).unwrap();
+    let out = db.execute("select distinct city from t order by city asc").unwrap();
+    assert_eq!(out, "city\nla\nny");
+}
+
+#[test]
+fn test_select_distinct_multiple_columns() {
+    let mut db = test_db();
+    db.execute("create table t (id int, city text)").unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into t values (2, "ny")"#).unwrap();
+    let out = db.execute("select distinct id,city from t order by id asc").unwrap();
+    assert_eq!(out, "id\tcity\n1\tny\n2\tny");
+}
+
+#[test]
+fn test_select_distinct_with_limit_offset() {
+    let mut db = test_db();
+    db.execute("create table t (id int)").unwrap();
+    db.execute("insert into t values (1)").unwrap();
+    db.execute("insert into t values (1)").unwrap();
+    db.execute("insert into t values (2)").unwrap();
+    db.execute("insert into t values (3)").unwrap();
+    let out = db.execute("select distinct id from t order by id asc offset 1 limit 1").unwrap();
+    assert_eq!(out, "id\n2");
+}
+
+#[test]
 fn test_select_offset_with_grouped_result() {
     let mut db = test_db();
     db.execute("create table t (id int, city text)").unwrap();

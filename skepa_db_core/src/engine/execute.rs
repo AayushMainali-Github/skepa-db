@@ -34,6 +34,7 @@ pub fn execute_command(
         Command::Delete { table, filter } => handle_delete(table, filter, catalog, storage),
         Command::Select {
             table,
+            distinct,
             join,
             columns,
             filter,
@@ -42,7 +43,7 @@ pub fn execute_command(
             order_by,
             limit,
             offset,
-        } => handle_select(table, join, columns, filter, group_by, having, order_by, limit, offset, catalog, storage),
+        } => handle_select(table, distinct, join, columns, filter, group_by, having, order_by, limit, offset, catalog, storage),
         Command::Begin | Command::Commit | Command::Rollback => {
             Err("Transaction control is handled by Database".to_string())
         }
@@ -271,6 +272,7 @@ fn handle_insert(
 
 fn handle_select(
     table: String,
+    distinct: bool,
     join: Option<JoinClause>,
     columns: Option<Vec<String>>,
     filter: Option<WhereClause>,
@@ -347,6 +349,9 @@ fn handle_select(
         if let Some(having_clause) = having.as_ref() {
             post_rows = filter_rows(&post_schema, &post_rows, having_clause)?;
         }
+        if distinct {
+            post_rows = dedupe_rows(post_rows);
+        }
 
         let mut ordered_rows = post_rows;
         if let Some(ob) = order_by {
@@ -383,6 +388,34 @@ fn handle_select(
 
     if having.is_some() {
         return Err("HAVING requires GROUP BY or aggregate functions".to_string());
+    }
+
+    if distinct {
+        let (out_schema, projected_rows) = project_rows(&select_schema, &filtered_rows, columns.as_ref())?;
+        let mut distinct_rows = dedupe_rows(projected_rows);
+        if let Some(ob) = order_by {
+            let mut criteria: Vec<(usize, bool)> = Vec::new();
+            criteria.push((resolve_column_index(&out_schema, &ob.column, "ORDER BY")?, ob.asc));
+            for (col, asc) in ob.then_by {
+                criteria.push((resolve_column_index(&out_schema, &col, "ORDER BY")?, asc));
+            }
+            distinct_rows.sort_by(|a, b| {
+                for (idx, asc) in &criteria {
+                    let ord = compare_for_order(a.get(*idx), b.get(*idx), *asc);
+                    if ord != Ordering::Equal {
+                        return ord;
+                    }
+                }
+                Ordering::Equal
+            });
+        }
+        let start = offset.unwrap_or(0);
+        let limited_rows = if let Some(n) = limit {
+            distinct_rows.into_iter().skip(start).take(n).collect::<Vec<_>>()
+        } else {
+            distinct_rows.into_iter().skip(start).collect::<Vec<_>>()
+        };
+        return Ok(format_select(&out_schema, &limited_rows));
     }
 
     let mut ordered_rows = filtered_rows;
@@ -446,6 +479,22 @@ fn handle_select(
 
     let (out_schema, out_rows) = project_rows(&select_schema, &limited_rows, columns.as_ref())?;
     Ok(format_select(&out_schema, &out_rows))
+}
+
+fn dedupe_rows(rows: Vec<Row>) -> Vec<Row> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<Row> = Vec::new();
+    for r in rows {
+        let key = r
+            .iter()
+            .map(value_to_string)
+            .collect::<Vec<_>>()
+            .join("\u{1F}");
+        if seen.insert(key) {
+            out.push(r);
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
