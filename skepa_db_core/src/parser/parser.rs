@@ -632,30 +632,40 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
         i = next_i;
     }
 
-    if i < tokens.len() && tokens[i].eq_ignore_ascii_case("limit") {
-        if i + 1 >= tokens.len() {
-            return Err(
-                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
-            );
+    while i < tokens.len() {
+        if tokens[i].eq_ignore_ascii_case("limit") {
+            if limit.is_some() {
+                return Err("LIMIT specified more than once".to_string());
+            }
+            if i + 1 >= tokens.len() {
+                return Err(
+                    "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
+                );
+            }
+            let n = tokens[i + 1]
+                .parse::<usize>()
+                .map_err(|_| "LIMIT must be a non-negative integer".to_string())?;
+            limit = Some(n);
+            i += 2;
+            continue;
         }
-        let n = tokens[i + 1]
-            .parse::<usize>()
-            .map_err(|_| "LIMIT must be a non-negative integer".to_string())?;
-        limit = Some(n);
-        i += 2;
-    }
-
-    if i < tokens.len() && tokens[i].eq_ignore_ascii_case("offset") {
-        if i + 1 >= tokens.len() {
-            return Err(
-                "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
-            );
+        if tokens[i].eq_ignore_ascii_case("offset") {
+            if offset.is_some() {
+                return Err("OFFSET specified more than once".to_string());
+            }
+            if i + 1 >= tokens.len() {
+                return Err(
+                    "Usage: select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>] [offset <n>]".to_string(),
+                );
+            }
+            let n = tokens[i + 1]
+                .parse::<usize>()
+                .map_err(|_| "OFFSET must be a non-negative integer".to_string())?;
+            offset = Some(n);
+            i += 2;
+            continue;
         }
-        let n = tokens[i + 1]
-            .parse::<usize>()
-            .map_err(|_| "OFFSET must be a non-negative integer".to_string())?;
-        offset = Some(n);
-        i += 2;
+        break;
     }
 
     if i != tokens.len() {

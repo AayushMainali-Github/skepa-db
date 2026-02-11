@@ -2775,6 +2775,16 @@ fn test_select_limit_and_offset() {
 }
 
 #[test]
+fn test_select_offset_then_limit() {
+    let mut db = test_db();
+    seed_users_3(&mut db);
+    let out = db
+        .execute("select * from users order by id asc offset 1 limit 1")
+        .unwrap();
+    assert_eq!(out, "id\tname\tage\n2\tb\t20");
+}
+
+#[test]
 fn test_select_offset_with_grouped_result() {
     let mut db = test_db();
     db.execute("create table t (id int, city text)").unwrap();

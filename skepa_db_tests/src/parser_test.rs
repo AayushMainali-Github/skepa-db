@@ -1886,6 +1886,24 @@ fn parse_select_with_limit_and_offset() {
     }
 }
 
+#[test]
+fn parse_select_with_offset_then_limit() {
+    let cmd = parse("select * from users order by id asc offset 2 limit 5").unwrap();
+    match cmd {
+        Command::Select { offset, limit, .. } => {
+            assert_eq!(offset, Some(2));
+            assert_eq!(limit, Some(5));
+        }
+        _ => panic!("Expected Select command"),
+    }
+}
+
+#[test]
+fn parse_select_duplicate_limit_or_offset_errors() {
+    assert!(parse("select * from users limit 1 limit 2").is_err());
+    assert!(parse("select * from users offset 1 offset 2").is_err());
+}
+
 
 
 
