@@ -45,7 +45,9 @@
   - `rollback`
 - Notes:
   - `insert`, `update`, `delete` can be grouped in one transaction.
-  - `create table` is auto-commit and is not allowed inside an active transaction.
+  - `create table`, `alter table`, `create index`, `drop index` are auto-commit operations and are not allowed inside an active transaction.
+  - `commit` validates deferred `foreign key ... no action` constraints before finalizing.
+  - If that validation fails, commit is rejected and the transaction state is rolled back.
 
 ## Update
 - Updates one or more columns for rows matching a WHERE condition.
@@ -104,5 +106,11 @@
   - `on update cascade` rewrites matching child key values when parent key values are updated.
   - `on delete set null` sets child FK columns to `null` when parent rows are deleted.
   - `on update set null` sets child FK columns to `null` when referenced parent keys are updated.
-  - `no action` currently behaves the same as immediate `restrict`.
+  - `no action` is deferred to `commit` inside a transaction (can be temporarily violated within tx and fixed before commit).
+  - outside explicit transactions, `no action` behaves like immediate validation for that statement.
   - If any FK child column is `null`, referential check is skipped for that row.
+
+## WAL / Recovery
+- WAL records are statement-based (`BEGIN`, `OP`, `COMMIT`, `ROLLBACK`).
+- On startup recovery, only committed transactions are replayed.
+- Replayed committed transactions are applied atomically: if replay of a tx fails or violates deferred `no action` checks, that tx is skipped and prior state is restored.
