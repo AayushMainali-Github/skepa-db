@@ -338,4 +338,49 @@ fn recovery_skips_committed_delete_with_on_delete_no_action_when_still_violated(
     }
 }
 
+#[test]
+fn recovery_mixed_committed_valid_and_invalid_txs_keeps_only_valid_effects() {
+    let path = temp_dir("wal_mixed_valid_invalid_txs");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table p (id int primary key)").unwrap();
+        db.execute("create table c (id int, pid int)").unwrap();
+        db.execute("alter table c add foreign key(pid) references p(id) on update no action")
+            .unwrap();
+        db.execute("insert into p values (1)").unwrap();
+        db.execute("insert into p values (2)").unwrap();
+        db.execute("insert into c values (10, 1)").unwrap();
+        db.execute("insert into c values (20, 2)").unwrap();
+    }
+
+    std::fs::write(
+        path.join("wal.log"),
+        concat!(
+            // tx 40: valid, should apply
+            "BEGIN 40\n",
+            "OP 40 update p set id = 3 where id = 2\n",
+            "OP 40 update c set pid = 3 where id = 20\n",
+            "COMMIT 40\n",
+            // tx 41: invalid NO ACTION, should be skipped
+            "BEGIN 41\n",
+            "OP 41 update p set id = 9 where id = 1\n",
+            "COMMIT 41\n",
+            // tx 42: valid and after invalid one, should still apply
+            "BEGIN 42\n",
+            "OP 42 update c set pid = 3 where id = 20\n",
+            "COMMIT 42\n",
+        ),
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(db.execute("select * from p order by id asc").unwrap(), "id\n1\n3");
+        assert_eq!(
+            db.execute("select * from c order by id asc").unwrap(),
+            "id\tpid\n10\t1\n20\t3"
+        );
+    }
+}
+
 
