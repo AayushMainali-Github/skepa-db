@@ -454,3 +454,75 @@ fn test_transaction_commit_persists_on_delete_set_null_side_effects() {
     assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\tnull");
 }
 
+#[test]
+fn test_alter_fk_on_update_no_action_deferred_commit_fails_when_violated() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (10, 1)").unwrap();
+    db.execute("alter table c add foreign key(pid) references p(id) on update no action")
+        .unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("update p set id = 2 where id = 1").unwrap();
+    let err = db.execute("commit").unwrap_err();
+    assert!(err.to_lowercase().contains("no action"));
+    assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t1");
+}
+
+#[test]
+fn test_alter_fk_on_update_no_action_commit_succeeds_when_fixed_in_tx() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (10, 1)").unwrap();
+    db.execute("alter table c add foreign key(pid) references p(id) on update no action")
+        .unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("update p set id = 2 where id = 1").unwrap();
+    db.execute("update c set pid = 2 where id = 10").unwrap();
+    assert_eq!(db.execute("commit").unwrap(), "transaction committed");
+    assert_eq!(db.execute("select * from p").unwrap(), "id\n2");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t2");
+}
+
+#[test]
+fn test_alter_fk_on_delete_no_action_deferred_commit_fails_when_violated() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (10, 1)").unwrap();
+    db.execute("alter table c add foreign key(pid) references p(id) on delete no action")
+        .unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("delete from p where id = 1").unwrap();
+    let err = db.execute("commit").unwrap_err();
+    assert!(err.to_lowercase().contains("no action"));
+    assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t1");
+}
+
+#[test]
+fn test_alter_fk_on_delete_no_action_commit_succeeds_when_fixed_in_tx() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (10, 1)").unwrap();
+    db.execute("alter table c add foreign key(pid) references p(id) on delete no action")
+        .unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("delete from p where id = 1").unwrap();
+    db.execute("delete from c where id = 10").unwrap();
+    assert_eq!(db.execute("commit").unwrap(), "transaction committed");
+    assert_eq!(db.execute("select * from p").unwrap(), "id");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid");
+}
+
