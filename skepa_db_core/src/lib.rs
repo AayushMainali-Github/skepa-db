@@ -190,6 +190,7 @@ impl Database {
 
         #[derive(Default)]
         struct ReplayTx {
+            first_line: usize,
             committed: bool,
             rolled_back: bool,
             ops: Vec<(usize, String)>,
@@ -211,7 +212,10 @@ impl Database {
                     let txid: u64 = parts[1]
                         .parse()
                         .map_err(|_| format!("WAL parse error at line {}: bad txid", idx + 1))?;
-                    txs.entry(txid).or_default();
+                    let tx = txs.entry(txid).or_default();
+                    if tx.first_line == 0 {
+                        tx.first_line = idx + 1;
+                    }
                 }
                 Some("OP") => {
                     if parts.len() != 3 {
@@ -220,10 +224,11 @@ impl Database {
                     let txid: u64 = parts[1]
                         .parse()
                         .map_err(|_| format!("WAL parse error at line {}: bad txid", idx + 1))?;
-                    txs.entry(txid)
-                        .or_default()
-                        .ops
-                        .push((idx + 1, parts[2].to_string()));
+                    let tx = txs.entry(txid).or_default();
+                    if tx.first_line == 0 {
+                        tx.first_line = idx + 1;
+                    }
+                    tx.ops.push((idx + 1, parts[2].to_string()));
                 }
                 Some("COMMIT") => {
                     if parts.len() != 2 {
@@ -232,7 +237,11 @@ impl Database {
                     let txid: u64 = parts[1]
                         .parse()
                         .map_err(|_| format!("WAL parse error at line {}: bad txid", idx + 1))?;
-                    txs.entry(txid).or_default().committed = true;
+                    let tx = txs.entry(txid).or_default();
+                    if tx.first_line == 0 {
+                        tx.first_line = idx + 1;
+                    }
+                    tx.committed = true;
                 }
                 Some("ROLLBACK") => {
                     if parts.len() != 2 {
@@ -241,7 +250,11 @@ impl Database {
                     let txid: u64 = parts[1]
                         .parse()
                         .map_err(|_| format!("WAL parse error at line {}: bad txid", idx + 1))?;
-                    txs.entry(txid).or_default().rolled_back = true;
+                    let tx = txs.entry(txid).or_default();
+                    if tx.first_line == 0 {
+                        tx.first_line = idx + 1;
+                    }
+                    tx.rolled_back = true;
                 }
                 Some(other) => {
                     return Err(format!("WAL parse error at line {}: unknown record kind '{other}'", idx + 1));
@@ -250,24 +263,43 @@ impl Database {
             }
         }
 
-        let mut ordered: Vec<(usize, String)> = Vec::new();
-        for tx in txs.values() {
-            if tx.committed && !tx.rolled_back {
-                for (line_no, stmt) in &tx.ops {
-                    ordered.push((*line_no, stmt.clone()));
+        let mut ordered_txs: Vec<(usize, ReplayTx)> = txs
+            .into_values()
+            .filter(|tx| tx.committed && !tx.rolled_back)
+            .map(|tx| (tx.first_line, tx))
+            .collect();
+        ordered_txs.sort_by_key(|(line, _)| *line);
+
+        for (_, tx) in ordered_txs {
+            let before_catalog = self.catalog.clone();
+            let before_storage = self.storage.clone();
+            let mut invalid_tx = false;
+
+            let mut ops = tx.ops;
+            ops.sort_by_key(|(line_no, _)| *line_no);
+
+            for (line_no, stmt) in ops {
+                let cmd = parser::parser::parse(&stmt)
+                    .map_err(|e| format!("WAL parse error at line {}: {}", line_no, e))?;
+                if matches!(
+                    cmd,
+                    Command::Create { .. } | Command::Begin | Command::Commit | Command::Rollback
+                ) {
+                    continue;
+                }
+                if let Err(e) = engine::execute_command(cmd, &mut self.catalog, &mut self.storage) {
+                    let _ = e;
+                    invalid_tx = true;
+                    break;
                 }
             }
-        }
-        ordered.sort_by_key(|(line_no, _)| *line_no);
 
-        for (line_no, stmt) in ordered {
-            let cmd = parser::parser::parse(&stmt)
-                .map_err(|e| format!("WAL parse error at line {}: {}", line_no, e))?;
-            if matches!(cmd, Command::Create { .. } | Command::Begin | Command::Commit | Command::Rollback) {
-                continue;
+            if invalid_tx
+                || engine::validate_no_action_constraints(&self.catalog, &self.storage).is_err()
+            {
+                self.catalog = before_catalog;
+                self.storage = before_storage;
             }
-            engine::execute_command(cmd, &mut self.catalog, &mut self.storage)
-                .map_err(|e| format!("WAL apply error at line {}: {}", line_no, e))?;
         }
 
         Ok(())

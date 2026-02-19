@@ -222,4 +222,62 @@ fn recovery_replays_committed_update_with_on_update_set_null() {
     }
 }
 
+#[test]
+fn recovery_replays_committed_update_with_on_update_no_action_when_fixed_in_tx() {
+    let path = temp_dir("wal_fk_update_no_action_fixed");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table p (id int primary key)").unwrap();
+        db.execute("create table c (id int, pid int)").unwrap();
+        db.execute("alter table c add foreign key(pid) references p(id) on update no action")
+            .unwrap();
+        db.execute("insert into p values (1)").unwrap();
+        db.execute("insert into c values (10, 1)").unwrap();
+    }
+
+    std::fs::write(
+        path.join("wal.log"),
+        concat!(
+            "BEGIN 31\n",
+            "OP 31 update p set id = 2 where id = 1\n",
+            "OP 31 update c set pid = 2 where id = 10\n",
+            "COMMIT 31\n",
+        ),
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(db.execute("select * from p").unwrap(), "id\n2");
+        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t2");
+    }
+}
+
+#[test]
+fn recovery_skips_committed_update_with_on_update_no_action_when_still_violated() {
+    let path = temp_dir("wal_fk_update_no_action_violated");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table p (id int primary key)").unwrap();
+        db.execute("create table c (id int, pid int)").unwrap();
+        db.execute("alter table c add foreign key(pid) references p(id) on update no action")
+            .unwrap();
+        db.execute("insert into p values (1)").unwrap();
+        db.execute("insert into c values (10, 1)").unwrap();
+    }
+
+    std::fs::write(
+        path.join("wal.log"),
+        "BEGIN 32\nOP 32 update p set id = 2 where id = 1\nCOMMIT 32\n",
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        // Invalid NO ACTION commit must not be applied during recovery.
+        assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
+        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t1");
+    }
+}
+
 
