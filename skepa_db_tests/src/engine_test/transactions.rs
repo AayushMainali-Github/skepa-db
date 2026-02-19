@@ -380,3 +380,77 @@ fn test_transaction_commit_persists_on_update_set_null_side_effects() {
     assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\tnull");
 }
 
+#[test]
+fn test_transaction_rollback_reverts_on_update_cascade_side_effects() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (10, 1)").unwrap();
+    db.execute("alter table c add foreign key(pid) references p(id) on update cascade")
+        .unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("update p set id = 2 where id = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t2");
+    db.execute("rollback").unwrap();
+
+    assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t1");
+}
+
+#[test]
+fn test_transaction_commit_persists_on_update_cascade_side_effects() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (10, 1)").unwrap();
+    db.execute("alter table c add foreign key(pid) references p(id) on update cascade")
+        .unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("update p set id = 2 where id = 1").unwrap();
+    db.execute("commit").unwrap();
+
+    assert_eq!(db.execute("select * from p").unwrap(), "id\n2");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t2");
+}
+
+#[test]
+fn test_transaction_rollback_reverts_on_delete_set_null_side_effects() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (10, 1)").unwrap();
+    db.execute("alter table c add foreign key(pid) references p(id) on delete set null")
+        .unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("delete from p where id = 1").unwrap();
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\tnull");
+    db.execute("rollback").unwrap();
+
+    assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t1");
+}
+
+#[test]
+fn test_transaction_commit_persists_on_delete_set_null_side_effects() {
+    let mut db = test_db();
+    db.execute("create table p (id int primary key)").unwrap();
+    db.execute("create table c (id int, pid int)").unwrap();
+    db.execute("insert into p values (1)").unwrap();
+    db.execute("insert into c values (10, 1)").unwrap();
+    db.execute("alter table c add foreign key(pid) references p(id) on delete set null")
+        .unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("delete from p where id = 1").unwrap();
+    db.execute("commit").unwrap();
+
+    assert_eq!(db.execute("select * from p").unwrap(), "id");
+    assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\tnull");
+}
+
