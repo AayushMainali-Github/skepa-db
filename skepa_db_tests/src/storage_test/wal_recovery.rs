@@ -148,4 +148,78 @@ fn recovery_ignores_commit_for_unknown_transaction() {
     }
 }
 
+#[test]
+fn recovery_replays_committed_delete_with_on_delete_cascade() {
+    let path = temp_dir("wal_fk_delete_cascade_replay");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table p (id int primary key)").unwrap();
+        db.execute("create table c (id int, pid int)").unwrap();
+        db.execute("alter table c add foreign key(pid) references p(id) on delete cascade")
+            .unwrap();
+        db.execute("insert into p values (1)").unwrap();
+        db.execute("insert into c values (10, 1)").unwrap();
+    }
+
+    std::fs::write(
+        path.join("wal.log"),
+        "BEGIN 21\nOP 21 delete from p where id = 1\nCOMMIT 21\n",
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(db.execute("select * from p").unwrap(), "id");
+        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid");
+    }
+}
+
+#[test]
+fn recovery_ignores_uncommitted_delete_with_on_delete_cascade() {
+    let path = temp_dir("wal_fk_delete_cascade_uncommitted");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table p (id int primary key)").unwrap();
+        db.execute("create table c (id int, pid int)").unwrap();
+        db.execute("alter table c add foreign key(pid) references p(id) on delete cascade")
+            .unwrap();
+        db.execute("insert into p values (1)").unwrap();
+        db.execute("insert into c values (10, 1)").unwrap();
+    }
+
+    std::fs::write(path.join("wal.log"), "BEGIN 22\nOP 22 delete from p where id = 1\n").unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
+        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t1");
+    }
+}
+
+#[test]
+fn recovery_replays_committed_update_with_on_update_set_null() {
+    let path = temp_dir("wal_fk_update_set_null_replay");
+    {
+        let mut db = Database::open(path.clone());
+        db.execute("create table p (id int primary key)").unwrap();
+        db.execute("create table c (id int, pid int)").unwrap();
+        db.execute("alter table c add foreign key(pid) references p(id) on update set null")
+            .unwrap();
+        db.execute("insert into p values (1)").unwrap();
+        db.execute("insert into c values (10, 1)").unwrap();
+    }
+
+    std::fs::write(
+        path.join("wal.log"),
+        "BEGIN 23\nOP 23 update p set id = 2 where id = 1\nCOMMIT 23\n",
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open(path.clone());
+        assert_eq!(db.execute("select * from p").unwrap(), "id\n2");
+        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\tnull");
+    }
+}
+
 
