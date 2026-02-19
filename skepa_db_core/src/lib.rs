@@ -134,14 +134,14 @@ impl Database {
             return Ok(out);
         }
 
-        if is_wal_write {
-            if let Err(e) = engine::validate_no_action_constraints(&self.catalog, &self.storage) {
-                if let (Some(c), Some(s)) = (pre_catalog, pre_storage) {
-                    self.catalog = c;
-                    self.storage = s;
-                }
-                return Err(e);
+        if is_wal_write
+            && let Err(e) = engine::validate_no_action_constraints(&self.catalog, &self.storage)
+        {
+            if let (Some(c), Some(s)) = (pre_catalog, pre_storage) {
+                self.catalog = c;
+                self.storage = s;
             }
+            return Err(e);
         }
 
         if is_schema_write {

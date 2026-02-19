@@ -45,6 +45,7 @@ fn validate_not_null_columns(schema: &Schema, rows: &[Row]) -> Result<(), String
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn unique_constraint_groups(
     schema: &Schema,
 ) -> Result<Vec<(&'static str, Vec<usize>, Vec<String>)>, String> {

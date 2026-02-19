@@ -12,6 +12,12 @@ pub struct Catalog {
     tables: HashMap<String, Schema>,
 }
 
+impl Default for Catalog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct CatalogFile {
     tables: HashMap<String, Vec<ColumnFile>>,

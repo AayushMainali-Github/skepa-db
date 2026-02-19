@@ -114,6 +114,7 @@ pub enum AlterAction {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     Begin,
     Commit,

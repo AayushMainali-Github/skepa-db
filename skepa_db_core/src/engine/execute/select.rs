@@ -1,3 +1,4 @@
+#[allow(clippy::too_many_arguments)]
 fn handle_select(
     table: String,
     distinct: bool,
@@ -152,10 +153,10 @@ fn handle_select(
         if let Some(req_cols) = columns.as_ref() {
             for item in req_cols {
                 let (expr, alias) = split_select_alias(item);
-                if let Some(a) = alias {
-                    if let Ok(idx) = resolve_column_index(&select_schema, &expr, "SELECT list") {
-                        alias_to_idx.insert(a, idx);
-                    }
+                if let Some(a) = alias
+                    && let Ok(idx) = resolve_column_index(&select_schema, &expr, "SELECT list")
+                {
+                    alias_to_idx.insert(a, idx);
                 }
             }
         }
@@ -585,10 +586,10 @@ fn aggregate_input_values(rows: &[Row], idx: usize, distinct: bool) -> Vec<Value
     if !distinct {
         let mut out: Vec<Value> = Vec::new();
         for r in rows {
-            if let Some(v) = r.get(idx) {
-                if !matches!(v, Value::Null) {
-                    out.push(v.clone());
-                }
+            if let Some(v) = r.get(idx)
+                && !matches!(v, Value::Null)
+            {
+                out.push(v.clone());
             }
         }
         return out;
@@ -718,7 +719,7 @@ fn build_join_rows(
             }
         } else if join.join_type == JoinType::Left {
             let mut row = lr.clone();
-            row.extend(std::iter::repeat(Value::Null).take(right_schema.columns.len()));
+            row.extend(std::iter::repeat_n(Value::Null, right_schema.columns.len()));
             out_rows.push(row);
         }
     }
