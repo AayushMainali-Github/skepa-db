@@ -11,12 +11,12 @@ pub fn format_select(schema: &Schema, rows: &[Row]) -> String {
         .map(|c| c.name.as_str())
         .collect::<Vec<_>>()
         .join("\t");
-    
+
     // If no rows, return just the header
     if rows.is_empty() {
         return header;
     }
-    
+
     // Build row lines
     let row_lines = rows
         .iter()
@@ -28,7 +28,7 @@ pub fn format_select(schema: &Schema, rows: &[Row]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    
+
     // Combine header and rows
     format!("{}\n{}", header, row_lines)
 }

@@ -28,7 +28,6 @@ fn bootstrap_malformed_row_count_errors() {
     assert!(err.to_lowercase().contains("expected 2 values"));
 }
 
-
 #[test]
 fn bootstrap_bad_type_prefix_errors() {
     let root = temp_dir("bad_prefix");
@@ -132,18 +131,16 @@ fn bootstrap_row_id_prefix_only_without_payload_errors() {
     assert!(err.to_lowercase().contains("expected 1 values"));
 }
 
-
 #[test]
 fn empty_wal_file_is_handled() {
     let path = temp_dir("empty_wal");
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
     }
     std::fs::write(path.join("wal.log"), "").unwrap();
     let mut reopened = Database::open(path);
     let out = reopened.execute("select * from users").unwrap();
     assert_eq!(out, "id\tname");
 }
-
-

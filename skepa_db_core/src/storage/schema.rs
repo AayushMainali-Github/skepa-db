@@ -1,5 +1,5 @@
-use crate::types::datatype::DataType;
 use crate::parser::command::ForeignKeyAction;
+use crate::types::datatype::DataType;
 
 #[derive(Debug, Clone)]
 pub struct ForeignKeyDef {

@@ -10,7 +10,8 @@ fn test_constraint_persistence_after_reopen() {
         let mut db = Database::open(path.clone());
         db.execute("create table t (id int primary key, email text unique, name text not null)")
             .unwrap();
-        db.execute(r#"insert into t values (1, "a@x.com", "ram")"#).unwrap();
+        db.execute(r#"insert into t values (1, "a@x.com", "ram")"#)
+            .unwrap();
     }
     {
         let mut db = Database::open(path.clone());
@@ -38,8 +39,10 @@ fn test_persistence_reopen_insert() {
 
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
-        db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
+        db.execute(r#"insert into users values (1, "ram")"#)
+            .unwrap();
     }
 
     {
@@ -59,11 +62,16 @@ fn test_persistence_reopen_update_delete() {
 
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text, age int)").unwrap();
-        db.execute(r#"insert into users values (1, "ram", 20)"#).unwrap();
-        db.execute(r#"insert into users values (2, "alice", 30)"#).unwrap();
-        db.execute(r#"update users set age = 99 where id = 1"#).unwrap();
-        db.execute(r#"delete from users where name = "alice""#).unwrap();
+        db.execute("create table users (id int, name text, age int)")
+            .unwrap();
+        db.execute(r#"insert into users values (1, "ram", 20)"#)
+            .unwrap();
+        db.execute(r#"insert into users values (2, "alice", 30)"#)
+            .unwrap();
+        db.execute(r#"update users set age = 99 where id = 1"#)
+            .unwrap();
+        db.execute(r#"delete from users where name = "alice""#)
+            .unwrap();
     }
 
     {
@@ -78,7 +86,10 @@ fn test_persistence_reopen_update_delete() {
 #[test]
 fn test_composite_pk_persists_and_rejects_after_reopen() {
     let mut path: PathBuf = std::env::temp_dir();
-    path.push(format!("skepa_db_composite_pk_reopen_{}", std::process::id()));
+    path.push(format!(
+        "skepa_db_composite_pk_reopen_{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&path);
 
     {
@@ -96,4 +107,3 @@ fn test_composite_pk_persists_and_rejects_after_reopen() {
 
     let _ = std::fs::remove_dir_all(&path);
 }
-

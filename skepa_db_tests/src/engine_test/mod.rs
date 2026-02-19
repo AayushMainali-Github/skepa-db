@@ -12,24 +12,25 @@ fn test_db() -> Database {
     Database::open(path)
 }
 
-
-
 fn seed_users_3(db: &mut Database) {
     db.execute("create table users (id int, name text, age int)")
         .unwrap();
-    db.execute(r#"insert into users values (1, "a", 30)"#).unwrap();
-    db.execute(r#"insert into users values (2, "b", 20)"#).unwrap();
-    db.execute(r#"insert into users values (3, "c", 10)"#).unwrap();
+    db.execute(r#"insert into users values (1, "a", 30)"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "b", 20)"#)
+        .unwrap();
+    db.execute(r#"insert into users values (3, "c", 10)"#)
+        .unwrap();
 }
 
-mod basic;
-mod dml;
-mod select;
-mod joins;
 mod aggregates;
+mod basic;
 mod constraints;
+mod dml;
 mod foreign_keys;
-mod transactions;
 mod indexes;
-mod persistence;
+mod joins;
 mod misc;
+mod persistence;
+mod select;
+mod transactions;

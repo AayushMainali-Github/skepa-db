@@ -6,10 +6,7 @@ fn diskstorage_persist_bootstrap_roundtrip() {
     let mut storage = DiskStorage::new(root.clone()).unwrap();
     storage.create_table("users").unwrap();
     storage
-        .insert_row(
-            "users",
-            vec![Value::Int(1), Value::Text("ram".to_string())],
-        )
+        .insert_row("users", vec![Value::Int(1), Value::Text("ram".to_string())])
         .unwrap();
     storage.persist_table("users").unwrap();
 
@@ -37,7 +34,6 @@ fn diskstorage_persist_bootstrap_roundtrip() {
     assert_eq!(rows[0][0], Value::Int(1));
     assert_eq!(rows[0][1], Value::Text("ram".to_string()));
 }
-
 
 #[test]
 fn diskstorage_text_escape_roundtrip() {
@@ -81,7 +77,6 @@ fn diskstorage_text_escape_roundtrip() {
     );
 }
 
-
 #[test]
 fn checkpoint_writes_table_files() {
     let root = temp_dir("checkpoint_files");
@@ -89,10 +84,7 @@ fn checkpoint_writes_table_files() {
     storage.create_table("users").unwrap();
     storage.create_table("products").unwrap();
     storage
-        .insert_row(
-            "users",
-            vec![Value::Int(1), Value::Text("ram".to_string())],
-        )
+        .insert_row("users", vec![Value::Int(1), Value::Text("ram".to_string())])
         .unwrap();
     storage
         .insert_row(
@@ -103,31 +95,36 @@ fn checkpoint_writes_table_files() {
 
     storage.checkpoint_all().unwrap();
     let users_rows = std::fs::read_to_string(root.join("tables").join("users.rows")).unwrap();
-    let products_rows =
-        std::fs::read_to_string(root.join("tables").join("products.rows")).unwrap();
+    let products_rows = std::fs::read_to_string(root.join("tables").join("products.rows")).unwrap();
     assert!(!users_rows.trim().is_empty());
     assert!(!products_rows.trim().is_empty());
 }
-
 
 #[test]
 fn reopen_is_idempotent_no_duplicate_rows() {
     let path = temp_dir("reopen_idempotent");
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
-        db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
+        db.execute(r#"insert into users values (1, "ram")"#)
+            .unwrap();
     }
     {
         let mut db = Database::open(path.clone());
-        assert_eq!(db.execute("select * from users").unwrap(), "id\tname\n1\tram");
+        assert_eq!(
+            db.execute("select * from users").unwrap(),
+            "id\tname\n1\tram"
+        );
     }
     {
         let mut db = Database::open(path.clone());
-        assert_eq!(db.execute("select * from users").unwrap(), "id\tname\n1\tram");
+        assert_eq!(
+            db.execute("select * from users").unwrap(),
+            "id\tname\n1\tram"
+        );
     }
 }
-
 
 #[test]
 fn persistence_roundtrip_extended_types() {
@@ -153,7 +150,6 @@ fn persistence_roundtrip_extended_types() {
     }
 }
 
-
 #[test]
 fn diskstorage_persists_null_values_roundtrip() {
     let root = temp_dir("null_roundtrip");
@@ -167,5 +163,3 @@ fn diskstorage_persists_null_values_roundtrip() {
         assert_eq!(db.execute("select * from t").unwrap(), "id\tname\n1\tnull");
     }
 }
-
-

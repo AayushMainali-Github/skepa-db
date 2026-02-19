@@ -1,5 +1,5 @@
-use crate::parser::command::{Command, JoinClause, JoinType, OrderBy, WhereClause};
 use super::where_clause::parse_where_clause;
+use crate::parser::command::{Command, JoinClause, JoinType, OrderBy, WhereClause};
 
 pub(super) fn parse_select(tokens: &[String]) -> Result<Command, String> {
     parse_select_projection(tokens)
@@ -41,7 +41,9 @@ fn parse_select_projection(tokens: &[String]) -> Result<Command, String> {
     let mut limit: Option<usize> = None;
     let mut offset: Option<usize> = None;
 
-    if i < tokens.len() && (tokens[i].eq_ignore_ascii_case("join") || tokens[i].eq_ignore_ascii_case("left")) {
+    if i < tokens.len()
+        && (tokens[i].eq_ignore_ascii_case("join") || tokens[i].eq_ignore_ascii_case("left"))
+    {
         let (join_type, join_kw_idx) = if tokens[i].eq_ignore_ascii_case("left") {
             if i + 1 >= tokens.len() || !tokens[i + 1].eq_ignore_ascii_case("join") {
                 return Err(
@@ -276,11 +278,17 @@ fn parse_select_columns(tokens: &[String]) -> Result<Vec<String>, String> {
                 j += 1;
             }
             if j >= tokens.len() || tokens[j] != ")" {
-                return Err("Bad SELECT function syntax. Use fn(col), fn(distinct col), or fn(*)".to_string());
+                return Err(
+                    "Bad SELECT function syntax. Use fn(col), fn(distinct col), or fn(*)"
+                        .to_string(),
+                );
             }
             let arg_tokens = &tokens[i + 2..j];
             if arg_tokens.is_empty() {
-                return Err("Bad SELECT function syntax. Use fn(col), fn(distinct col), or fn(*)".to_string());
+                return Err(
+                    "Bad SELECT function syntax. Use fn(col), fn(distinct col), or fn(*)"
+                        .to_string(),
+                );
             }
             if arg_tokens[0].eq_ignore_ascii_case("distinct") && arg_tokens.len() < 2 {
                 return Err("Bad SELECT function syntax. DISTINCT requires a column".to_string());
@@ -312,7 +320,10 @@ fn parse_select_columns(tokens: &[String]) -> Result<Vec<String>, String> {
         }
     }
     if columns.is_empty() {
-        return Err("SELECT column list cannot be empty. Use '*' or comma-separated column names.".to_string());
+        return Err(
+            "SELECT column list cannot be empty. Use '*' or comma-separated column names."
+                .to_string(),
+        );
     }
 
     Ok(columns)
@@ -337,7 +348,6 @@ fn parse_group_by_columns(tokens: &[String], mut i: usize) -> Result<(Vec<String
     }
     Ok((cols, i))
 }
-
 
 pub(super) fn find_where_end(tokens: &[String], start: usize) -> Result<usize, String> {
     let mut i = start;
@@ -399,4 +409,3 @@ fn normalize_function_tokens(tokens: &[String]) -> Result<Vec<String>, String> {
     }
     Ok(out)
 }
-

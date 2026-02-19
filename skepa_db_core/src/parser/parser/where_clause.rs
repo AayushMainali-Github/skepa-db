@@ -16,7 +16,10 @@ pub(super) fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
     }
 }
 
-pub(super) fn parse_where_clause(tokens: &[String], usage_msg: &str) -> Result<WhereClause, String> {
+pub(super) fn parse_where_clause(
+    tokens: &[String],
+    usage_msg: &str,
+) -> Result<WhereClause, String> {
     let mut idx = 0usize;
     let expr = parse_or_expr(tokens, &mut idx, usage_msg)?;
     if idx != tokens.len() {
@@ -25,7 +28,11 @@ pub(super) fn parse_where_clause(tokens: &[String], usage_msg: &str) -> Result<W
     Ok(expr)
 }
 
-fn parse_or_expr(tokens: &[String], idx: &mut usize, usage_msg: &str) -> Result<WhereClause, String> {
+fn parse_or_expr(
+    tokens: &[String],
+    idx: &mut usize,
+    usage_msg: &str,
+) -> Result<WhereClause, String> {
     let mut left = parse_and_expr(tokens, idx, usage_msg)?;
     while *idx < tokens.len() && tokens[*idx].eq_ignore_ascii_case("or") {
         *idx += 1;
@@ -39,7 +46,11 @@ fn parse_or_expr(tokens: &[String], idx: &mut usize, usage_msg: &str) -> Result<
     Ok(left)
 }
 
-fn parse_and_expr(tokens: &[String], idx: &mut usize, usage_msg: &str) -> Result<WhereClause, String> {
+fn parse_and_expr(
+    tokens: &[String],
+    idx: &mut usize,
+    usage_msg: &str,
+) -> Result<WhereClause, String> {
     let mut left = parse_primary_expr(tokens, idx, usage_msg)?;
     while *idx < tokens.len() && tokens[*idx].eq_ignore_ascii_case("and") {
         *idx += 1;
@@ -53,7 +64,11 @@ fn parse_and_expr(tokens: &[String], idx: &mut usize, usage_msg: &str) -> Result
     Ok(left)
 }
 
-fn parse_primary_expr(tokens: &[String], idx: &mut usize, usage_msg: &str) -> Result<WhereClause, String> {
+fn parse_primary_expr(
+    tokens: &[String],
+    idx: &mut usize,
+    usage_msg: &str,
+) -> Result<WhereClause, String> {
     if *idx >= tokens.len() {
         return Err(usage_msg.to_string());
     }
@@ -69,7 +84,11 @@ fn parse_primary_expr(tokens: &[String], idx: &mut usize, usage_msg: &str) -> Re
     parse_predicate(tokens, idx, usage_msg)
 }
 
-fn parse_predicate(tokens: &[String], idx: &mut usize, usage_msg: &str) -> Result<WhereClause, String> {
+fn parse_predicate(
+    tokens: &[String],
+    idx: &mut usize,
+    usage_msg: &str,
+) -> Result<WhereClause, String> {
     if *idx + 2 < tokens.len()
         && tokens[*idx + 1].eq_ignore_ascii_case("is")
         && tokens[*idx + 2].eq_ignore_ascii_case("null")
@@ -143,4 +162,3 @@ fn parse_predicate(tokens: &[String], idx: &mut usize, usage_msg: &str) -> Resul
     }
     Err(usage_msg.to_string())
 }
-

@@ -38,7 +38,6 @@ fn catalog_save_load_roundtrip() {
     assert_eq!(schema.columns[1].name, "name");
 }
 
-
 #[test]
 fn catalog_load_missing_file_is_empty() {
     let path = temp_dir("catalog_missing").join("missing_catalog.json");
@@ -136,5 +135,3 @@ fn catalog_save_load_roundtrip_with_constraints() {
     assert_eq!(posts.foreign_keys[0].columns, vec!["user_id".to_string()]);
     assert_eq!(posts.foreign_keys[0].ref_table, "users");
 }
-
-

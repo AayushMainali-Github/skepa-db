@@ -1,5 +1,5 @@
-use crate::parser::command::{AlterAction, Command, ForeignKeyAction};
 use super::common::{parse_column_name_list, parse_foreign_key_action};
+use crate::parser::command::{AlterAction, Command, ForeignKeyAction};
 
 pub(super) fn parse_alter(tokens: &[String]) -> Result<Command, String> {
     if tokens.len() < 5 || !tokens[1].eq_ignore_ascii_case("table") {
@@ -99,7 +99,9 @@ fn parse_alter_drop(tokens: &[String]) -> Result<AlterAction, String> {
             return Err("Bad ALTER TABLE DROP FOREIGN KEY syntax. Missing REFERENCES".to_string());
         }
         if after_cols + 1 >= tokens.len() {
-            return Err("Bad ALTER TABLE DROP FOREIGN KEY syntax. Missing parent table".to_string());
+            return Err(
+                "Bad ALTER TABLE DROP FOREIGN KEY syntax. Missing parent table".to_string(),
+            );
         }
         let ref_table = tokens[after_cols + 1].clone();
         let (ref_cols, next) = parse_column_name_list(tokens, after_cols + 2, tokens.len())?;

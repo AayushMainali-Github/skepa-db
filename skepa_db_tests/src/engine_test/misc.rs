@@ -18,10 +18,14 @@ fn test_pk_eq_update_path_updates_only_target_row() {
     let mut db = test_db();
     db.execute("create table users (id int primary key, name text, age int)")
         .unwrap();
-    db.execute(r#"insert into users values (1, "a", 10)"#).unwrap();
-    db.execute(r#"insert into users values (2, "b", 20)"#).unwrap();
+    db.execute(r#"insert into users values (1, "a", 10)"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "b", 20)"#)
+        .unwrap();
 
-    let out = db.execute(r#"update users set age = 99 where id = 2"#).unwrap();
+    let out = db
+        .execute(r#"update users set age = 99 where id = 2"#)
+        .unwrap();
     assert_eq!(out, "updated 1 row(s) in users");
     assert_eq!(
         db.execute("select * from users").unwrap(),
@@ -50,8 +54,14 @@ fn test_pk_update_reindexes_for_future_pk_lookup() {
     db.execute(r#"insert into users values (1, "a")"#).unwrap();
 
     db.execute("update users set id = 10 where id = 1").unwrap();
-    assert_eq!(db.execute("select * from users where id = 10").unwrap(), "id\tname\n10\ta");
-    assert_eq!(db.execute("select * from users where id = 1").unwrap(), "id\tname");
+    assert_eq!(
+        db.execute("select * from users where id = 10").unwrap(),
+        "id\tname\n10\ta"
+    );
+    assert_eq!(
+        db.execute("select * from users where id = 1").unwrap(),
+        "id\tname"
+    );
 }
 
 #[test]
@@ -145,7 +155,8 @@ fn test_alter_drop_one_fk_keeps_other_fk_enforced() {
     let mut db = test_db();
     db.execute("create table p1 (id int primary key)").unwrap();
     db.execute("create table p2 (id int primary key)").unwrap();
-    db.execute("create table c (id int, p1_id int, p2_id int)").unwrap();
+    db.execute("create table c (id int, p1_id int, p2_id int)")
+        .unwrap();
     db.execute("insert into p1 values (1)").unwrap();
     db.execute("insert into p2 values (2)").unwrap();
     db.execute("insert into c values (1, 1, 2)").unwrap();
@@ -163,4 +174,3 @@ fn test_alter_drop_one_fk_keeps_other_fk_enforced() {
     let err = db.execute("insert into c values (3, 1, 999)").unwrap_err();
     assert!(err.to_lowercase().contains("foreign key"));
 }
-

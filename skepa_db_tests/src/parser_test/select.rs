@@ -149,7 +149,10 @@ fn select_column_list_double_comma_errors() {
 #[test]
 fn select_requires_table_after_from() {
     let err = parse("select * from").unwrap_err();
-    assert!(err.to_lowercase().contains("usage: select") || err.to_lowercase().contains("missing table"));
+    assert!(
+        err.to_lowercase().contains("usage: select")
+            || err.to_lowercase().contains("missing table")
+    );
 }
 
 #[test]
@@ -243,16 +246,27 @@ fn parse_select_rejects_projection_ending_comma_longer() {
 fn parse_select_where_value_can_be_quoted_spaces() {
     let cmd = parse(r#"select * from t where name = "hello world""#).unwrap();
     match cmd {
-        Command::Select { filter, .. } => { let wf = filter.expect("where"); assert_eq!(pred(&wf).value, "hello world") },
+        Command::Select { filter, .. } => {
+            let wf = filter.expect("where");
+            assert_eq!(pred(&wf).value, "hello world")
+        }
         _ => panic!("Expected Select command"),
     }
 }
 
 #[test]
 fn parse_select_with_order_by_and_limit() {
-    let cmd = parse("select id,name from users where age gte 18 order by name desc limit 5").unwrap();
+    let cmd =
+        parse("select id,name from users where age gte 18 order by name desc limit 5").unwrap();
     match cmd {
-        Command::Select { table, columns, filter, order_by, limit, .. } => {
+        Command::Select {
+            table,
+            columns,
+            filter,
+            order_by,
+            limit,
+            ..
+        } => {
             assert_eq!(table, "users");
             assert_eq!(columns.unwrap(), vec!["id", "name"]);
             let f = filter.expect("where");
@@ -270,7 +284,9 @@ fn parse_select_with_order_by_and_limit() {
 fn parse_select_with_order_by_only() {
     let cmd = parse("select * from users order by id asc").unwrap();
     match cmd {
-        Command::Select { order_by, limit, .. } => {
+        Command::Select {
+            order_by, limit, ..
+        } => {
             assert_eq!(limit, None);
             let ob = order_by.expect("order");
             assert_eq!(ob.column, "id");
@@ -368,14 +384,18 @@ fn parse_select_where_and_chain() {
 fn parse_select_where_or_chain() {
     let cmd = parse("select * from users where city = \"ny\" or city = \"la\"").unwrap();
     match cmd {
-        Command::Select { filter, .. } => { match filter.expect("where") { WhereClause::Binary { .. } => {}, _ => panic!("expected binary where expression") } },
+        Command::Select { filter, .. } => match filter.expect("where") {
+            WhereClause::Binary { .. } => {}
+            _ => panic!("expected binary where expression"),
+        },
         _ => panic!("Expected Select command"),
     }
 }
 
 #[test]
 fn parse_select_where_parentheses() {
-    let cmd = parse("select * from users where (age gt 18 or city = \"ny\") and city is not null").unwrap();
+    let cmd = parse("select * from users where (age gt 18 or city = \"ny\") and city is not null")
+        .unwrap();
     match cmd {
         Command::Select { filter, .. } => match filter.expect("where") {
             WhereClause::Binary { .. } => {}
@@ -414,9 +434,17 @@ fn parse_more_select_struct_fields_are_populated() {
 
 #[test]
 fn parse_select_with_inner_join_basic() {
-    let cmd = parse("select users.id,profiles.city from users join profiles on users.id = profiles.user_id").unwrap();
+    let cmd = parse(
+        "select users.id,profiles.city from users join profiles on users.id = profiles.user_id",
+    )
+    .unwrap();
     match cmd {
-        Command::Select { table, join, columns, .. } => {
+        Command::Select {
+            table,
+            join,
+            columns,
+            ..
+        } => {
             assert_eq!(table, "users");
             let j = join.expect("join");
             assert_eq!(j.join_type, JoinType::Inner);
@@ -433,7 +461,13 @@ fn parse_select_with_inner_join_basic() {
 fn parse_select_with_inner_join_where_order_limit() {
     let cmd = parse("select * from users join profiles on users.id = profiles.user_id where profiles.city = \"ny\" order by users.id desc limit 2").unwrap();
     match cmd {
-        Command::Select { join, filter, order_by, limit, .. } => {
+        Command::Select {
+            join,
+            filter,
+            order_by,
+            limit,
+            ..
+        } => {
             assert!(join.is_some());
             assert!(filter.is_some());
             assert_eq!(order_by.expect("order").column, "users.id");
@@ -450,7 +484,8 @@ fn parse_select_join_bad_on_syntax_errors() {
 
 #[test]
 fn parse_select_with_left_join_basic() {
-    let cmd = parse("select * from users left join profiles on users.id = profiles.user_id").unwrap();
+    let cmd =
+        parse("select * from users left join profiles on users.id = profiles.user_id").unwrap();
     match cmd {
         Command::Select { join, .. } => {
             let j = join.expect("left join");
@@ -470,7 +505,9 @@ fn parse_select_left_join_requires_join_keyword() {
 fn parse_select_group_by_basic() {
     let cmd = parse("select city,count(*) from users group by city").unwrap();
     match cmd {
-        Command::Select { columns, group_by, .. } => {
+        Command::Select {
+            columns, group_by, ..
+        } => {
             assert_eq!(columns.unwrap(), vec!["city", "count(*)"]);
             assert_eq!(group_by.expect("group by"), vec!["city"]);
         }
@@ -480,9 +517,18 @@ fn parse_select_group_by_basic() {
 
 #[test]
 fn parse_select_group_by_where_order_limit() {
-    let cmd = parse("select city,sum(age) from users where age gte 10 group by city order by city asc limit 3").unwrap();
+    let cmd = parse(
+        "select city,sum(age) from users where age gte 10 group by city order by city asc limit 3",
+    )
+    .unwrap();
     match cmd {
-        Command::Select { filter, group_by, order_by, limit, .. } => {
+        Command::Select {
+            filter,
+            group_by,
+            order_by,
+            limit,
+            ..
+        } => {
             assert!(filter.is_some());
             assert_eq!(group_by.expect("group by"), vec!["city"]);
             assert_eq!(order_by.expect("order").column, "city");
@@ -496,7 +542,9 @@ fn parse_select_group_by_where_order_limit() {
 fn parse_select_aggregate_without_group_by() {
     let cmd = parse("select count(*),avg(age) from users").unwrap();
     match cmd {
-        Command::Select { columns, group_by, .. } => {
+        Command::Select {
+            columns, group_by, ..
+        } => {
             assert_eq!(columns.unwrap(), vec!["count(*)", "avg(age)"]);
             assert!(group_by.is_none());
         }
@@ -561,9 +609,14 @@ fn parse_select_group_by_missing_by_errors() {
 
 #[test]
 fn parse_select_group_by_having() {
-    let cmd = parse("select city,count(*) from users group by city having count(*) gt 1 order by city asc").unwrap();
+    let cmd = parse(
+        "select city,count(*) from users group by city having count(*) gt 1 order by city asc",
+    )
+    .unwrap();
     match cmd {
-        Command::Select { group_by, having, .. } => {
+        Command::Select {
+            group_by, having, ..
+        } => {
             assert_eq!(group_by.expect("group by"), vec!["city"]);
             let h = having.expect("having");
             let p = pred(&h);
@@ -586,7 +639,10 @@ fn parse_select_having_without_group_by_is_parsed() {
 
 #[test]
 fn parse_select_group_having_order_by_aggregate() {
-    let cmd = parse("select city,count(*) from users group by city having count(*) gt 0 order by count(*) desc").unwrap();
+    let cmd = parse(
+        "select city,count(*) from users group by city having count(*) gt 0 order by count(*) desc",
+    )
+    .unwrap();
     match cmd {
         Command::Select { order_by, .. } => {
             let ob = order_by.expect("order by");
@@ -657,8 +713,13 @@ fn parse_select_with_aliases() {
 fn parse_select_order_by_alias() {
     let cmd = parse("select city,count(*) as c from users group by city order by c desc").unwrap();
     match cmd {
-        Command::Select { columns, order_by, .. } => {
-            assert_eq!(columns.unwrap(), vec!["city".to_string(), "count(*) as c".to_string()]);
+        Command::Select {
+            columns, order_by, ..
+        } => {
+            assert_eq!(
+                columns.unwrap(),
+                vec!["city".to_string(), "count(*) as c".to_string()]
+            );
             let ob = order_by.expect("order by");
             assert_eq!(ob.column, "c");
             assert!(!ob.asc);
@@ -671,7 +732,9 @@ fn parse_select_order_by_alias() {
 fn parse_select_distinct_basic() {
     let cmd = parse("select distinct city from users").unwrap();
     match cmd {
-        Command::Select { distinct, columns, .. } => {
+        Command::Select {
+            distinct, columns, ..
+        } => {
             assert!(distinct);
             assert_eq!(columns.unwrap(), vec!["city".to_string()]);
         }
@@ -695,8 +758,8 @@ fn parse_select_distinct_star() {
 
 #[test]
 fn parse_select_order_by_function_with_spaced_parens() {
-    let cmd = parse("select city,count(*) from users group by city order by count ( * ) desc")
-        .unwrap();
+    let cmd =
+        parse("select city,count(*) from users group by city order by count ( * ) desc").unwrap();
     match cmd {
         Command::Select { order_by, .. } => {
             let ob = order_by.expect("order by");
@@ -763,7 +826,9 @@ fn parse_select_join_with_missing_on_rhs_errors() {
 
 #[test]
 fn parse_select_having_without_group_with_order_and_limit() {
-    let cmd = parse("select count(*) from users having count(*) gt 0 order by count(*) desc limit 1").unwrap();
+    let cmd =
+        parse("select count(*) from users having count(*) gt 0 order by count(*) desc limit 1")
+            .unwrap();
     match cmd {
         Command::Select {
             columns,
@@ -780,4 +845,3 @@ fn parse_select_having_without_group_with_order_and_limit() {
         _ => panic!("expected select"),
     }
 }
-

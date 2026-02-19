@@ -48,7 +48,10 @@ fn tokenize_rejects_characters_after_closing_quote() {
 #[test]
 fn tokenize_rejects_adjacent_quoted_tokens_without_space() {
     let err = parse(r#"insert into users values (1, "a""b")"#).unwrap_err();
-    assert!(err.to_lowercase().contains("unexpected quote after closing quote"));
+    assert!(
+        err.to_lowercase()
+            .contains("unexpected quote after closing quote")
+    );
 }
 
 #[test]
@@ -62,4 +65,3 @@ fn tokenizer_handles_parentheses_without_spaces() {
         _ => panic!("Expected Create command"),
     }
 }
-

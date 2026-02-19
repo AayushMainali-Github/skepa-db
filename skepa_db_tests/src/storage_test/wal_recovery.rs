@@ -5,20 +5,22 @@ fn wal_is_truncated_after_write() {
     let path = temp_dir("wal_truncate");
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
-        db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
+        db.execute(r#"insert into users values (1, "ram")"#)
+            .unwrap();
     }
     let wal = std::fs::read_to_string(path.join("wal.log")).unwrap();
     assert_eq!(wal, "");
 }
-
 
 #[test]
 fn recovery_ignores_uncommitted_wal_transaction() {
     let path = temp_dir("wal_uncommitted_ignored");
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
     }
 
     // Simulate crash after BEGIN + OP, before COMMIT.
@@ -35,13 +37,13 @@ fn recovery_ignores_uncommitted_wal_transaction() {
     }
 }
 
-
 #[test]
 fn recovery_replays_committed_wal_transaction() {
     let path = temp_dir("wal_committed_replayed");
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
     }
 
     // Simulate crash after COMMIT record is durable but before checkpoint.
@@ -58,13 +60,13 @@ fn recovery_replays_committed_wal_transaction() {
     }
 }
 
-
 #[test]
 fn recovery_replays_only_committed_when_wal_has_mixed_transactions() {
     let path = temp_dir("wal_mixed_recovery");
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
     }
 
     std::fs::write(
@@ -90,13 +92,13 @@ fn recovery_replays_only_committed_when_wal_has_mixed_transactions() {
     }
 }
 
-
 #[test]
 fn recovery_ignores_explicitly_rolled_back_transaction() {
     let path = temp_dir("wal_rolled_back_ignored");
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
     }
 
     std::fs::write(
@@ -112,13 +114,13 @@ fn recovery_ignores_explicitly_rolled_back_transaction() {
     }
 }
 
-
 #[test]
 fn recovery_commit_without_ops_is_noop() {
     let path = temp_dir("wal_commit_noop");
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
     }
 
     std::fs::write(path.join("wal.log"), "BEGIN 99\nCOMMIT 99\n").unwrap();
@@ -130,13 +132,13 @@ fn recovery_commit_without_ops_is_noop() {
     }
 }
 
-
 #[test]
 fn recovery_ignores_commit_for_unknown_transaction() {
     let path = temp_dir("wal_unknown_commit");
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
     }
 
     std::fs::write(path.join("wal.log"), "COMMIT 123\n").unwrap();
@@ -187,7 +189,11 @@ fn recovery_ignores_uncommitted_delete_with_on_delete_cascade() {
         db.execute("insert into c values (10, 1)").unwrap();
     }
 
-    std::fs::write(path.join("wal.log"), "BEGIN 22\nOP 22 delete from p where id = 1\n").unwrap();
+    std::fs::write(
+        path.join("wal.log"),
+        "BEGIN 22\nOP 22 delete from p where id = 1\n",
+    )
+    .unwrap();
 
     {
         let mut db = Database::open(path.clone());
@@ -375,12 +381,13 @@ fn recovery_mixed_committed_valid_and_invalid_txs_keeps_only_valid_effects() {
 
     {
         let mut db = Database::open(path.clone());
-        assert_eq!(db.execute("select * from p order by id asc").unwrap(), "id\n1\n3");
+        assert_eq!(
+            db.execute("select * from p order by id asc").unwrap(),
+            "id\n1\n3"
+        );
         assert_eq!(
             db.execute("select * from c order by id asc").unwrap(),
             "id\tpid\n10\t1\n20\t3"
         );
     }
 }
-
-

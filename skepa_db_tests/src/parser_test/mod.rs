@@ -9,10 +9,10 @@ fn pred(clause: &WhereClause) -> &skepa_db_core::parser::command::Predicate {
     }
 }
 
-mod create;
 mod alter;
+mod create;
 mod dml;
+mod misc;
 mod select;
 mod tokenizer;
 mod tx;
-mod misc;

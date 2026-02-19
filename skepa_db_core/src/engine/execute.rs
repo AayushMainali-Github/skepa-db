@@ -5,9 +5,9 @@ use crate::parser::command::{
 };
 use crate::storage::schema::ForeignKeyDef;
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
-use crate::types::datatype::DataType;
-use crate::types::value::{parse_value, value_to_string, Value};
 use crate::types::Row;
+use crate::types::datatype::DataType;
+use crate::types::value::{Value, parse_value, value_to_string};
 use rust_decimal::Decimal;
 use std::cmp::Ordering;
 

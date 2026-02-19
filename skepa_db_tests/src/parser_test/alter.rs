@@ -111,16 +111,15 @@ fn parse_alter_drop_not_null() {
 
 #[test]
 fn parse_alter_add_unique_empty_cols_errors() {
-    assert!(parse("alter table users add unique()") .is_err());
+    assert!(parse("alter table users add unique()").is_err());
 }
 
 #[test]
 fn parse_alter_drop_unique_empty_cols_errors() {
-    assert!(parse("alter table users drop unique()") .is_err());
+    assert!(parse("alter table users drop unique()").is_err());
 }
 
 #[test]
 fn parse_alter_add_fk_missing_reference_cols_errors() {
-    assert!(parse("alter table c add foreign key (pid) references p") .is_err());
+    assert!(parse("alter table c add foreign key (pid) references p").is_err());
 }
-

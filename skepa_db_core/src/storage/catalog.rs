@@ -1,10 +1,10 @@
+use crate::parser::command::{ColumnDef, ForeignKeyAction, TableConstraintDef};
+use crate::storage::schema::{Column, ForeignKeyDef, Schema};
+use crate::types::datatype::DataType;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-use crate::parser::command::{ColumnDef, ForeignKeyAction, TableConstraintDef};
-use crate::types::datatype::DataType;
-use crate::storage::schema::{Schema, Column, ForeignKeyDef};
 
 /// Manages table schemas (metadata catalog)
 #[derive(Debug, Clone)]

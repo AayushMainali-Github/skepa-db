@@ -3,19 +3,26 @@ use super::*;
 #[test]
 fn test_transaction_commit_persists_changes() {
     let mut db = test_db();
-    db.execute("create table users (id int, name text)").unwrap();
+    db.execute("create table users (id int, name text)")
+        .unwrap();
     assert_eq!(db.execute("begin").unwrap(), "transaction started");
-    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#)
+        .unwrap();
     assert_eq!(db.execute("commit").unwrap(), "transaction committed");
-    assert_eq!(db.execute("select * from users").unwrap(), "id\tname\n1\tram");
+    assert_eq!(
+        db.execute("select * from users").unwrap(),
+        "id\tname\n1\tram"
+    );
 }
 
 #[test]
 fn test_transaction_rollback_discards_changes() {
     let mut db = test_db();
-    db.execute("create table users (id int, name text)").unwrap();
+    db.execute("create table users (id int, name text)")
+        .unwrap();
     db.execute("begin").unwrap();
-    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#)
+        .unwrap();
     assert_eq!(db.execute("rollback").unwrap(), "transaction rolled back");
     assert_eq!(db.execute("select * from users").unwrap(), "id\tname");
 }
@@ -23,10 +30,15 @@ fn test_transaction_rollback_discards_changes() {
 #[test]
 fn test_transaction_is_visible_inside_tx_before_commit() {
     let mut db = test_db();
-    db.execute("create table users (id int, name text)").unwrap();
+    db.execute("create table users (id int, name text)")
+        .unwrap();
     db.execute("begin").unwrap();
-    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
-    assert_eq!(db.execute("select * from users").unwrap(), "id\tname\n1\tram");
+    db.execute(r#"insert into users values (1, "ram")"#)
+        .unwrap();
+    assert_eq!(
+        db.execute("select * from users").unwrap(),
+        "id\tname\n1\tram"
+    );
     db.execute("rollback").unwrap();
 }
 
@@ -57,7 +69,10 @@ fn test_create_inside_transaction_is_rejected() {
     let mut db = test_db();
     db.execute("begin").unwrap();
     let err = db.execute("create table t (id int)").unwrap_err();
-    assert!(err.to_lowercase().contains("cannot run inside an active transaction"));
+    assert!(
+        err.to_lowercase()
+            .contains("cannot run inside an active transaction")
+    );
 }
 
 #[test]
@@ -68,15 +83,20 @@ fn test_transaction_commit_persists_after_reopen() {
 
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
         db.execute("begin").unwrap();
-        db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+        db.execute(r#"insert into users values (1, "ram")"#)
+            .unwrap();
         db.execute("commit").unwrap();
     }
 
     {
         let mut db = Database::open(path.clone());
-        assert_eq!(db.execute("select * from users").unwrap(), "id\tname\n1\tram");
+        assert_eq!(
+            db.execute("select * from users").unwrap(),
+            "id\tname\n1\tram"
+        );
     }
 
     let _ = std::fs::remove_dir_all(&path);
@@ -90,9 +110,11 @@ fn test_transaction_rollback_not_persisted_after_reopen() {
 
     {
         let mut db = Database::open(path.clone());
-        db.execute("create table users (id int, name text)").unwrap();
+        db.execute("create table users (id int, name text)")
+            .unwrap();
         db.execute("begin").unwrap();
-        db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+        db.execute(r#"insert into users values (1, "ram")"#)
+            .unwrap();
         db.execute("rollback").unwrap();
     }
 
@@ -110,12 +132,18 @@ fn test_transaction_commit_with_multiple_operations() {
     db.execute("create table users (id int primary key, name text, age int)")
         .unwrap();
     db.execute("begin").unwrap();
-    db.execute(r#"insert into users values (1, "a", 10)"#).unwrap();
-    db.execute(r#"insert into users values (2, "b", 20)"#).unwrap();
-    db.execute(r#"update users set age = 21 where id = 2"#).unwrap();
+    db.execute(r#"insert into users values (1, "a", 10)"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "b", 20)"#)
+        .unwrap();
+    db.execute(r#"update users set age = 21 where id = 2"#)
+        .unwrap();
     db.execute(r#"delete from users where name = "a""#).unwrap();
     db.execute("commit").unwrap();
-    assert_eq!(db.execute("select * from users").unwrap(), "id\tname\tage\n2\tb\t21");
+    assert_eq!(
+        db.execute("select * from users").unwrap(),
+        "id\tname\tage\n2\tb\t21"
+    );
 }
 
 #[test]
@@ -168,13 +196,12 @@ fn test_transaction_commit_no_conflict_when_other_table_changes() {
     tx_db.execute("begin").unwrap();
     tx_db.execute("update a set v = 11 where id = 1").unwrap();
     std::thread::sleep(Duration::from_millis(5));
-    other_db.execute("update b set v = 101 where id = 1").unwrap();
+    other_db
+        .execute("update b set v = 101 where id = 1")
+        .unwrap();
 
     assert_eq!(tx_db.execute("commit").unwrap(), "transaction committed");
-    assert_eq!(
-        tx_db.execute("select * from a").unwrap(),
-        "id\tv\n1\t11"
-    );
+    assert_eq!(tx_db.execute("select * from a").unwrap(), "id\tv\n1\t11");
 
     let _ = std::fs::remove_dir_all(&path);
 }
@@ -184,11 +211,14 @@ fn test_transaction_rollback_reverts_update_and_delete() {
     let mut db = test_db();
     db.execute("create table users (id int, name text, age int)")
         .unwrap();
-    db.execute(r#"insert into users values (1, "a", 10)"#).unwrap();
-    db.execute(r#"insert into users values (2, "b", 20)"#).unwrap();
+    db.execute(r#"insert into users values (1, "a", 10)"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "b", 20)"#)
+        .unwrap();
 
     db.execute("begin").unwrap();
-    db.execute("update users set age = 99 where id = 1").unwrap();
+    db.execute("update users set age = 99 where id = 1")
+        .unwrap();
     db.execute(r#"delete from users where name = "b""#).unwrap();
     db.execute("rollback").unwrap();
 
@@ -203,8 +233,10 @@ fn test_transaction_rollback_restores_after_constraint_error() {
     let mut db = test_db();
     db.execute("create table users (id int primary key, email text unique)")
         .unwrap();
-    db.execute(r#"insert into users values (1, "a@x.com")"#).unwrap();
-    db.execute(r#"insert into users values (2, "b@x.com")"#).unwrap();
+    db.execute(r#"insert into users values (1, "a@x.com")"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "b@x.com")"#)
+        .unwrap();
 
     db.execute("begin").unwrap();
     let err = db
@@ -222,7 +254,8 @@ fn test_transaction_rollback_restores_after_constraint_error() {
 #[test]
 fn test_transaction_commit_without_mutations_is_allowed() {
     let mut db = test_db();
-    db.execute("create table users (id int, name text)").unwrap();
+    db.execute("create table users (id int, name text)")
+        .unwrap();
     db.execute("begin").unwrap();
     let out = db.execute("commit").unwrap();
     assert_eq!(out, "transaction committed");
@@ -236,34 +269,45 @@ fn test_select_still_works_while_transaction_active() {
     db.execute(r#"insert into t values (1, "a")"#).unwrap();
     db.execute("begin").unwrap();
     db.execute(r#"insert into t values (2, "b")"#).unwrap();
-    assert_eq!(db.execute("select name from t where id = 1").unwrap(), "name\na");
+    assert_eq!(
+        db.execute("select name from t where id = 1").unwrap(),
+        "name\na"
+    );
     db.execute("rollback").unwrap();
 }
 
 #[test]
 fn test_transaction_multiple_updates_then_rollback() {
     let mut db = test_db();
-    db.execute("create table t (id int primary key, v int)").unwrap();
+    db.execute("create table t (id int primary key, v int)")
+        .unwrap();
     db.execute("insert into t values (1, 10)").unwrap();
     db.execute("insert into t values (2, 20)").unwrap();
     db.execute("begin").unwrap();
     db.execute("update t set v = 11 where id = 1").unwrap();
     db.execute("update t set v = 22 where id = 2").unwrap();
     db.execute("rollback").unwrap();
-    assert_eq!(db.execute("select * from t").unwrap(), "id\tv\n1\t10\n2\t20");
+    assert_eq!(
+        db.execute("select * from t").unwrap(),
+        "id\tv\n1\t10\n2\t20"
+    );
 }
 
 #[test]
 fn test_transaction_multiple_deletes_then_rollback() {
     let mut db = test_db();
-    db.execute("create table t (id int primary key, v int)").unwrap();
+    db.execute("create table t (id int primary key, v int)")
+        .unwrap();
     db.execute("insert into t values (1, 10)").unwrap();
     db.execute("insert into t values (2, 20)").unwrap();
     db.execute("begin").unwrap();
     db.execute("delete from t where id = 1").unwrap();
     db.execute("delete from t where id = 2").unwrap();
     db.execute("rollback").unwrap();
-    assert_eq!(db.execute("select * from t").unwrap(), "id\tv\n1\t10\n2\t20");
+    assert_eq!(
+        db.execute("select * from t").unwrap(),
+        "id\tv\n1\t10\n2\t20"
+    );
 }
 
 #[test]
@@ -299,7 +343,8 @@ fn test_alter_table_not_allowed_inside_transaction() {
 #[test]
 fn test_index_not_allowed_inside_transaction() {
     let mut db = test_db();
-    db.execute("create table users (id int, email text)").unwrap();
+    db.execute("create table users (id int, email text)")
+        .unwrap();
     db.execute("begin").unwrap();
     let err = db.execute("create index on users (email)").unwrap_err();
     assert!(err.to_lowercase().contains("auto-commit"));
@@ -525,4 +570,3 @@ fn test_alter_fk_on_delete_no_action_commit_succeeds_when_fixed_in_tx() {
     assert_eq!(db.execute("select * from p").unwrap(), "id");
     assert_eq!(db.execute("select * from c").unwrap(), "id\tpid");
 }
-

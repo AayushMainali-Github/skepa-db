@@ -3,12 +3,18 @@ use super::*;
 #[test]
 fn test_select_inner_join_basic() {
     let mut db = test_db();
-    db.execute("create table users (id int primary key, name text)").unwrap();
-    db.execute("create table profiles (user_id int, city text)").unwrap();
-    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
-    db.execute(r#"insert into users values (2, "avi")"#).unwrap();
-    db.execute(r#"insert into profiles values (1, "ny")"#).unwrap();
-    db.execute(r#"insert into profiles values (2, "la")"#).unwrap();
+    db.execute("create table users (id int primary key, name text)")
+        .unwrap();
+    db.execute("create table profiles (user_id int, city text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "avi")"#)
+        .unwrap();
+    db.execute(r#"insert into profiles values (1, "ny")"#)
+        .unwrap();
+    db.execute(r#"insert into profiles values (2, "la")"#)
+        .unwrap();
 
     let out = db
         .execute("select users.id,profiles.city from users join profiles on users.id = profiles.user_id order by users.id asc")
@@ -24,21 +30,31 @@ fn test_select_inner_join_star_projection() {
     db.execute(r#"insert into u values (1, "a")"#).unwrap();
     db.execute(r#"insert into p values (1, "x")"#).unwrap();
 
-    let out = db.execute("select * from u join p on u.id = p.uid").unwrap();
+    let out = db
+        .execute("select * from u join p on u.id = p.uid")
+        .unwrap();
     assert_eq!(out, "u.id\tu.name\tp.uid\tp.city\n1\ta\t1\tx");
 }
 
 #[test]
 fn test_select_inner_join_where_order_limit() {
     let mut db = test_db();
-    db.execute("create table users (id int, name text)").unwrap();
-    db.execute("create table profiles (user_id int, city text)").unwrap();
-    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
-    db.execute(r#"insert into users values (2, "avi")"#).unwrap();
-    db.execute(r#"insert into users values (3, "sam")"#).unwrap();
-    db.execute(r#"insert into profiles values (1, "ny")"#).unwrap();
-    db.execute(r#"insert into profiles values (2, "ny")"#).unwrap();
-    db.execute(r#"insert into profiles values (3, "la")"#).unwrap();
+    db.execute("create table users (id int, name text)")
+        .unwrap();
+    db.execute("create table profiles (user_id int, city text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "avi")"#)
+        .unwrap();
+    db.execute(r#"insert into users values (3, "sam")"#)
+        .unwrap();
+    db.execute(r#"insert into profiles values (1, "ny")"#)
+        .unwrap();
+    db.execute(r#"insert into profiles values (2, "ny")"#)
+        .unwrap();
+    db.execute(r#"insert into profiles values (3, "la")"#)
+        .unwrap();
 
     let out = db.execute(r#"select users.id,profiles.city from users join profiles on users.id = profiles.user_id where profiles.city = "ny" order by users.id desc limit 1"#).unwrap();
     assert_eq!(out, "users.id\tprofiles.city\n2\tny");
@@ -47,10 +63,14 @@ fn test_select_inner_join_where_order_limit() {
 #[test]
 fn test_select_inner_join_with_unqualified_unique_column_reference() {
     let mut db = test_db();
-    db.execute("create table users (id int, name text)").unwrap();
-    db.execute("create table profiles (user_id int, city text)").unwrap();
-    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
-    db.execute(r#"insert into profiles values (1, "ny")"#).unwrap();
+    db.execute("create table users (id int, name text)")
+        .unwrap();
+    db.execute("create table profiles (user_id int, city text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#)
+        .unwrap();
+    db.execute(r#"insert into profiles values (1, "ny")"#)
+        .unwrap();
 
     let out = db.execute(r#"select city from users join profiles on users.id = profiles.user_id where city = "ny""#).unwrap();
     assert_eq!(out, "profiles.city\nny");
@@ -150,10 +170,14 @@ fn test_select_inner_join_null_join_key_does_not_match() {
 #[test]
 fn test_select_inner_join_one_to_many_returns_all_matches() {
     let mut db = test_db();
-    db.execute("create table users (id int, name text)").unwrap();
-    db.execute("create table posts (user_id int, title text)").unwrap();
-    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
-    db.execute(r#"insert into users values (2, "avi")"#).unwrap();
+    db.execute("create table users (id int, name text)")
+        .unwrap();
+    db.execute("create table posts (user_id int, title text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "avi")"#)
+        .unwrap();
     db.execute(r#"insert into posts values (1, "p1")"#).unwrap();
     db.execute(r#"insert into posts values (1, "p2")"#).unwrap();
     db.execute(r#"insert into posts values (2, "p3")"#).unwrap();
@@ -167,13 +191,17 @@ fn test_select_inner_join_one_to_many_returns_all_matches() {
 #[test]
 fn test_select_inner_join_many_to_one_returns_all_matches() {
     let mut db = test_db();
-    db.execute("create table users (id int, city text)").unwrap();
-    db.execute("create table city_info (city text, zone text)").unwrap();
+    db.execute("create table users (id int, city text)")
+        .unwrap();
+    db.execute("create table city_info (city text, zone text)")
+        .unwrap();
     db.execute(r#"insert into users values (1, "ny")"#).unwrap();
     db.execute(r#"insert into users values (2, "ny")"#).unwrap();
     db.execute(r#"insert into users values (3, "la")"#).unwrap();
-    db.execute(r#"insert into city_info values ("ny", "east")"#).unwrap();
-    db.execute(r#"insert into city_info values ("la", "west")"#).unwrap();
+    db.execute(r#"insert into city_info values ("ny", "east")"#)
+        .unwrap();
+    db.execute(r#"insert into city_info values ("la", "west")"#)
+        .unwrap();
 
     let out = db
         .execute("select users.id,city_info.zone from users join city_info on users.city = city_info.city order by users.id asc")
@@ -184,13 +212,20 @@ fn test_select_inner_join_many_to_one_returns_all_matches() {
 #[test]
 fn test_select_left_join_includes_unmatched_left_rows() {
     let mut db = test_db();
-    db.execute("create table users (id int, name text)").unwrap();
-    db.execute("create table profiles (user_id int, city text)").unwrap();
-    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
-    db.execute(r#"insert into users values (2, "avi")"#).unwrap();
-    db.execute(r#"insert into users values (3, "sam")"#).unwrap();
-    db.execute(r#"insert into profiles values (1, "ny")"#).unwrap();
-    db.execute(r#"insert into profiles values (2, "la")"#).unwrap();
+    db.execute("create table users (id int, name text)")
+        .unwrap();
+    db.execute("create table profiles (user_id int, city text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "avi")"#)
+        .unwrap();
+    db.execute(r#"insert into users values (3, "sam")"#)
+        .unwrap();
+    db.execute(r#"insert into profiles values (1, "ny")"#)
+        .unwrap();
+    db.execute(r#"insert into profiles values (2, "la")"#)
+        .unwrap();
 
     let out = db
         .execute("select users.id,profiles.city from users left join profiles on users.id = profiles.user_id order by users.id asc")
@@ -201,13 +236,20 @@ fn test_select_left_join_includes_unmatched_left_rows() {
 #[test]
 fn test_select_left_join_where_on_right_column_filters_null_rows_out() {
     let mut db = test_db();
-    db.execute("create table users (id int, name text)").unwrap();
-    db.execute("create table profiles (user_id int, city text)").unwrap();
-    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
-    db.execute(r#"insert into users values (2, "avi")"#).unwrap();
-    db.execute(r#"insert into users values (3, "sam")"#).unwrap();
-    db.execute(r#"insert into profiles values (1, "ny")"#).unwrap();
-    db.execute(r#"insert into profiles values (2, "la")"#).unwrap();
+    db.execute("create table users (id int, name text)")
+        .unwrap();
+    db.execute("create table profiles (user_id int, city text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "avi")"#)
+        .unwrap();
+    db.execute(r#"insert into users values (3, "sam")"#)
+        .unwrap();
+    db.execute(r#"insert into profiles values (1, "ny")"#)
+        .unwrap();
+    db.execute(r#"insert into profiles values (2, "la")"#)
+        .unwrap();
 
     let out = db
         .execute(r#"select users.id from users left join profiles on users.id = profiles.user_id where profiles.city = "ny" order by users.id asc"#)
@@ -246,4 +288,3 @@ fn test_select_left_join_order_limit() {
         .unwrap();
     assert_eq!(out, "a.id\tb.v\n3\tnull\n2\ty");
 }
-

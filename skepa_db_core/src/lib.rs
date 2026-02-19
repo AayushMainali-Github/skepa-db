@@ -1,11 +1,11 @@
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::{fs, io::Write};
-use std::hash::{Hash, Hasher};
 
-pub mod types;
+pub mod engine;
 pub mod parser;
 pub mod storage;
-pub mod engine;
+pub mod types;
 
 use parser::command::Command;
 use storage::{Catalog, DiskStorage};
@@ -32,8 +32,7 @@ pub struct Database {
 impl Database {
     pub fn open(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        let storage = DiskStorage::new(path.clone())
-            .expect("Failed to initialize disk storage");
+        let storage = DiskStorage::new(path.clone()).expect("Failed to initialize disk storage");
         let catalog_path = path.join("catalog.json");
         let catalog = Catalog::load_from_path(&catalog_path).unwrap_or_else(|_| Catalog::new());
 
@@ -46,7 +45,10 @@ impl Database {
         };
 
         for (table, _) in db.catalog.snapshot_tables() {
-            let schema = db.catalog.schema(&table).expect("Missing schema while bootstrapping");
+            let schema = db
+                .catalog
+                .schema(&table)
+                .expect("Missing schema while bootstrapping");
             db.storage
                 .bootstrap_table(&table, schema)
                 .expect("Failed to bootstrap table in storage");
@@ -103,7 +105,10 @@ impl Database {
                 | Command::CreateIndex { .. }
                 | Command::DropIndex { .. }
         );
-        let is_wal_write = matches!(cmd, Command::Insert { .. } | Command::Update { .. } | Command::Delete { .. });
+        let is_wal_write = matches!(
+            cmd,
+            Command::Insert { .. } | Command::Update { .. } | Command::Delete { .. }
+        );
         let is_in_tx = self.current_tx.is_some();
 
         let pre_catalog = if !is_in_tx && is_wal_write {
@@ -185,8 +190,8 @@ impl Database {
         if !wal_path.exists() {
             return Ok(());
         }
-        let content = fs::read_to_string(&wal_path)
-            .map_err(|e| format!("Failed to read WAL: {e}"))?;
+        let content =
+            fs::read_to_string(&wal_path).map_err(|e| format!("Failed to read WAL: {e}"))?;
 
         #[derive(Default)]
         struct ReplayTx {
@@ -207,7 +212,10 @@ impl Database {
             match parts.first().copied() {
                 Some("BEGIN") => {
                     if parts.len() != 2 {
-                        return Err(format!("WAL parse error at line {}: malformed BEGIN record", idx + 1));
+                        return Err(format!(
+                            "WAL parse error at line {}: malformed BEGIN record",
+                            idx + 1
+                        ));
                     }
                     let txid: u64 = parts[1]
                         .parse()
@@ -219,7 +227,10 @@ impl Database {
                 }
                 Some("OP") => {
                     if parts.len() != 3 {
-                        return Err(format!("WAL parse error at line {}: malformed OP record", idx + 1));
+                        return Err(format!(
+                            "WAL parse error at line {}: malformed OP record",
+                            idx + 1
+                        ));
                     }
                     let txid: u64 = parts[1]
                         .parse()
@@ -232,7 +243,10 @@ impl Database {
                 }
                 Some("COMMIT") => {
                     if parts.len() != 2 {
-                        return Err(format!("WAL parse error at line {}: malformed COMMIT record", idx + 1));
+                        return Err(format!(
+                            "WAL parse error at line {}: malformed COMMIT record",
+                            idx + 1
+                        ));
                     }
                     let txid: u64 = parts[1]
                         .parse()
@@ -245,7 +259,10 @@ impl Database {
                 }
                 Some("ROLLBACK") => {
                     if parts.len() != 2 {
-                        return Err(format!("WAL parse error at line {}: malformed ROLLBACK record", idx + 1));
+                        return Err(format!(
+                            "WAL parse error at line {}: malformed ROLLBACK record",
+                            idx + 1
+                        ));
                     }
                     let txid: u64 = parts[1]
                         .parse()
@@ -257,7 +274,10 @@ impl Database {
                     tx.rolled_back = true;
                 }
                 Some(other) => {
-                    return Err(format!("WAL parse error at line {}: unknown record kind '{other}'", idx + 1));
+                    return Err(format!(
+                        "WAL parse error at line {}: unknown record kind '{other}'",
+                        idx + 1
+                    ));
                 }
                 None => {}
             }
@@ -306,8 +326,7 @@ impl Database {
     }
 
     fn truncate_wal(&self) -> Result<(), String> {
-        fs::write(self.path.join("wal.log"), "")
-            .map_err(|e| format!("Failed to truncate WAL: {e}"))
+        fs::write(self.path.join("wal.log"), "").map_err(|e| format!("Failed to truncate WAL: {e}"))
     }
 
     fn checkpoint_and_truncate_wal(&self) -> Result<(), String> {
@@ -408,8 +427,11 @@ impl Database {
 
     fn table_file_version(&self, table: &str) -> Result<u64, String> {
         let path = self.path.join("tables").join(format!("{table}.rows"));
-        let bytes = fs::read(&path)
-            .map_err(|e| format!("Failed to read table file for '{table}' while checking transaction conflict: {e}"))?;
+        let bytes = fs::read(&path).map_err(|e| {
+            format!(
+                "Failed to read table file for '{table}' while checking transaction conflict: {e}"
+            )
+        })?;
         let mut h = std::collections::hash_map::DefaultHasher::new();
         bytes.hash(&mut h);
         Ok(h.finish())

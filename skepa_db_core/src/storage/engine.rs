@@ -1,5 +1,5 @@
-use crate::types::Row;
 use crate::storage::Schema;
+use crate::types::Row;
 
 /// Storage engine trait - abstraction for different storage backends
 /// (in-memory, disk-based, etc.)

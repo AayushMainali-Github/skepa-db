@@ -1,14 +1,14 @@
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 
-use crate::storage::engine::StorageEngine;
 use crate::storage::Schema;
-use crate::types::datatype::DataType;
-use crate::types::value::{parse_value, value_to_string, Value};
+use crate::storage::engine::StorageEngine;
 use crate::types::Row;
+use crate::types::datatype::DataType;
+use crate::types::value::{Value, parse_value, value_to_string};
 
 /// Disk-backed storage scaffold.
 /// For now this keeps rows in-memory during process lifetime while

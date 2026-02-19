@@ -1,11 +1,10 @@
+use skepa_db_core::Database;
 use skepa_db_core::parser::command::ColumnDef;
 use skepa_db_core::storage::{Catalog, Column, DiskStorage, Schema, StorageEngine};
 use skepa_db_core::types::datatype::DataType;
 use skepa_db_core::types::value::Value;
-use skepa_db_core::Database;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-
 
 fn temp_dir(prefix: &str) -> PathBuf {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -21,12 +20,9 @@ fn temp_dir(prefix: &str) -> PathBuf {
     path
 }
 
-
-mod catalog;
 mod bootstrap;
-mod wal_recovery;
+mod catalog;
 mod indexes;
-mod row_ids;
 mod persistence;
-
-
+mod row_ids;
+mod wal_recovery;

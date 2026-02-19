@@ -21,8 +21,7 @@ fn parse_create_basic() {
 fn create_rejects_unknown_datatype() {
     let err = parse("create table users (id integer, name text)").unwrap_err();
     assert!(
-        err.to_lowercase().contains("unknown type")
-            || err.to_lowercase().contains("use int|text")
+        err.to_lowercase().contains("unknown type") || err.to_lowercase().contains("use int|text")
     );
 }
 
@@ -113,10 +112,8 @@ fn parse_unknown_constraint_token_errors() {
 
 #[test]
 fn parse_create_with_composite_constraints() {
-    let cmd = parse(
-        "create table m (a int, b int, c text, primary key(a,b), unique(b,c))",
-    )
-    .unwrap();
+    let cmd =
+        parse("create table m (a int, b int, c text, primary key(a,b), unique(b,c))").unwrap();
     match cmd {
         Command::Create {
             columns,
@@ -278,9 +275,14 @@ fn parse_create_table_constraint_unique_single_col() {
 
 #[test]
 fn parse_create_with_foreign_key_constraint() {
-    let cmd = parse("create table orders (id int, user_id int, foreign key(user_id) references users(id))").unwrap();
+    let cmd = parse(
+        "create table orders (id int, user_id int, foreign key(user_id) references users(id))",
+    )
+    .unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => {
+        Command::Create {
+            table_constraints, ..
+        } => {
             assert_eq!(table_constraints.len(), 1);
         }
         _ => panic!("Expected Create command"),
@@ -289,12 +291,11 @@ fn parse_create_with_foreign_key_constraint() {
 
 #[test]
 fn parse_create_with_composite_foreign_key_constraint() {
-    let cmd = parse(
-        "create table c (a int, b int, foreign key(a,b) references p(x,y))",
-    )
-    .unwrap();
+    let cmd = parse("create table c (a int, b int, foreign key(a,b) references p(x,y))").unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => {
+        Command::Create {
+            table_constraints, ..
+        } => {
             assert_eq!(table_constraints.len(), 1);
         }
         _ => panic!("Expected Create command"),
@@ -342,24 +343,24 @@ fn parse_foreign_key_missing_references_errors() {
 
 #[test]
 fn parse_foreign_key_on_delete_cascade() {
-    let cmd = parse(
-        "create table c (a int, foreign key(a) references p(id) on delete cascade)",
-    )
-    .unwrap();
+    let cmd =
+        parse("create table c (a int, foreign key(a) references p(id) on delete cascade)").unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
         _ => panic!("Expected Create command"),
     }
 }
 
 #[test]
 fn parse_foreign_key_on_delete_restrict() {
-    let cmd = parse(
-        "create table c (a int, foreign key(a) references p(id) on delete restrict)",
-    )
-    .unwrap();
+    let cmd = parse("create table c (a int, foreign key(a) references p(id) on delete restrict)")
+        .unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
         _ => panic!("Expected Create command"),
     }
 }
@@ -385,12 +386,12 @@ fn parse_foreign_key_missing_parent_columns_errors() {
 
 #[test]
 fn parse_foreign_key_on_delete_case_insensitive() {
-    let cmd = parse(
-        "create table c (a int, foreign key(a) references p(id) ON DELETE CASCADE)",
-    )
-    .unwrap();
+    let cmd =
+        parse("create table c (a int, foreign key(a) references p(id) ON DELETE CASCADE)").unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
         _ => panic!("Expected Create command"),
     }
 }
@@ -421,31 +422,33 @@ fn parse_two_foreign_keys_in_one_table() {
     )
     .unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 2),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 2),
         _ => panic!("Expected Create command"),
     }
 }
 
 #[test]
 fn parse_foreign_key_on_update_cascade() {
-    let cmd = parse(
-        "create table c (a int, foreign key(a) references p(id) on update cascade)",
-    )
-    .unwrap();
+    let cmd =
+        parse("create table c (a int, foreign key(a) references p(id) on update cascade)").unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
         _ => panic!("Expected Create command"),
     }
 }
 
 #[test]
 fn parse_foreign_key_on_update_restrict() {
-    let cmd = parse(
-        "create table c (a int, foreign key(a) references p(id) on update restrict)",
-    )
-    .unwrap();
+    let cmd = parse("create table c (a int, foreign key(a) references p(id) on update restrict)")
+        .unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
         _ => panic!("Expected Create command"),
     }
 }
@@ -459,48 +462,48 @@ fn parse_foreign_key_unknown_on_update_action_errors() {
 
 #[test]
 fn parse_foreign_key_on_delete_set_null() {
-    let cmd = parse(
-        "create table c (a int, foreign key(a) references p(id) on delete set null)",
-    )
-    .unwrap();
+    let cmd = parse("create table c (a int, foreign key(a) references p(id) on delete set null)")
+        .unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
         _ => panic!("Expected Create command"),
     }
 }
 
 #[test]
 fn parse_foreign_key_on_update_set_null() {
-    let cmd = parse(
-        "create table c (a int, foreign key(a) references p(id) on update set null)",
-    )
-    .unwrap();
+    let cmd = parse("create table c (a int, foreign key(a) references p(id) on update set null)")
+        .unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
         _ => panic!("Expected Create command"),
     }
 }
 
 #[test]
 fn parse_foreign_key_on_delete_no_action() {
-    let cmd = parse(
-        "create table c (a int, foreign key(a) references p(id) on delete no action)",
-    )
-    .unwrap();
+    let cmd = parse("create table c (a int, foreign key(a) references p(id) on delete no action)")
+        .unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
         _ => panic!("Expected Create command"),
     }
 }
 
 #[test]
 fn parse_foreign_key_on_update_no_action() {
-    let cmd = parse(
-        "create table c (a int, foreign key(a) references p(id) on update no action)",
-    )
-    .unwrap();
+    let cmd = parse("create table c (a int, foreign key(a) references p(id) on update no action)")
+        .unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
         _ => panic!("Expected Create command"),
     }
 }
@@ -512,7 +515,9 @@ fn parse_foreign_key_composite_with_spaces() {
     )
     .unwrap();
     match cmd {
-        Command::Create { table_constraints, .. } => assert_eq!(table_constraints.len(), 1),
+        Command::Create {
+            table_constraints, ..
+        } => assert_eq!(table_constraints.len(), 1),
         _ => panic!("Expected Create command"),
     }
 }
@@ -572,4 +577,3 @@ fn parse_create_index_basic() {
 fn parse_create_index_missing_table_errors() {
     assert!(parse("create index on (id)").is_err());
 }
-

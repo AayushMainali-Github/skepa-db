@@ -178,7 +178,11 @@ fn update_where_requires_three_tokens() {
 fn update_supports_no_spaces_around_equals() {
     let cmd = parse(r#"update users set age=20 where id=1"#).unwrap();
     match cmd {
-        Command::Update { assignments, filter, .. } => {
+        Command::Update {
+            assignments,
+            filter,
+            ..
+        } => {
             assert_eq!(assignments[0].column, "age");
             assert_eq!(assignments[0].value, "20");
             let pf = pred(&filter);
@@ -392,4 +396,3 @@ fn parse_insert_handles_escaped_quote_text() {
         _ => panic!("expected insert"),
     }
 }
-

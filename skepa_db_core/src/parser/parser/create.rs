@@ -1,6 +1,6 @@
+use super::common::{parse_column_name_list, parse_foreign_key_action};
 use crate::parser::command::{ColumnDef, Command, ForeignKeyAction, TableConstraintDef};
 use crate::types::datatype::{DataType, parse_datatype};
-use super::common::{parse_column_name_list, parse_foreign_key_action};
 
 pub(super) fn parse_create(tokens: &[String]) -> Result<Command, String> {
     if tokens.len() >= 2 && tokens[1].eq_ignore_ascii_case("index") {
@@ -202,7 +202,9 @@ fn parse_table_constraint_in_create(
     }
     if tokens[start].eq_ignore_ascii_case("foreign") {
         if start + 1 >= end || !tokens[start + 1].eq_ignore_ascii_case("key") {
-            return Err("Bad FOREIGN KEY constraint. Use foreign key(col) references t(col)".to_string());
+            return Err(
+                "Bad FOREIGN KEY constraint. Use foreign key(col) references t(col)".to_string(),
+            );
         }
         let (cols, after_cols) = parse_column_name_list(tokens, start + 2, end)?;
         if after_cols >= end || !tokens[after_cols].eq_ignore_ascii_case("references") {
@@ -250,4 +252,3 @@ fn parse_table_constraint_in_create(
     }
     Err("Unknown table constraint".to_string())
 }
-

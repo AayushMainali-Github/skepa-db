@@ -30,19 +30,29 @@ fn main() {
             println!("Commands:");
             println!("  parse <cmd>   -> show parsed Command (debug)");
             println!("  begin | commit | rollback");
-            println!("  create table <table> (<col> <type> [primary key|unique|not null], ..., [primary key(<col,...>)], [unique(<col,...>)], [foreign key(<col,...>) references <table>(<col,...>) [on delete restrict|cascade|set null|no action] [on update restrict|cascade|set null|no action]])");
+            println!(
+                "  create table <table> (<col> <type> [primary key|unique|not null], ..., [primary key(<col,...>)], [unique(<col,...>)], [foreign key(<col,...>) references <table>(<col,...>) [on delete restrict|cascade|set null|no action] [on update restrict|cascade|set null|no action]])"
+            );
             println!("  alter table <table> add unique(<col,...>)");
             println!("  alter table <table> drop unique(<col,...>)");
-            println!("  alter table <table> add foreign key(<col,...>) references <table>(<col,...>) [on delete ...] [on update ...]");
-            println!("  alter table <table> drop foreign key(<col,...>) references <table>(<col,...>)");
+            println!(
+                "  alter table <table> add foreign key(<col,...>) references <table>(<col,...>) [on delete ...] [on update ...]"
+            );
+            println!(
+                "  alter table <table> drop foreign key(<col,...>) references <table>(<col,...>)"
+            );
             println!("  alter table <table> alter column <col> set not null");
             println!("  alter table <table> alter column <col> drop not null");
             println!("  create index on <table> (<col,...>)");
             println!("  drop index on <table> (<col,...>)");
             println!("  insert into <table> values (<v1>, <v2>, ...)");
-            println!("  update <table> set <col> = <value> [, <col> = <value> ...] where <column> <op> <value>");
+            println!(
+                "  update <table> set <col> = <value> [, <col> = <value> ...] where <column> <op> <value>"
+            );
             println!("  delete from <table> where <column> <op> <value>");
-            println!("  select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]");
+            println!(
+                "  select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]"
+            );
             println!("  where ops: =|eq|>|gt|<|lt|>=|gte|<=|lte|like");
             println!("  like uses '*' and '?' wildcards, e.g. \"ra*\", \"*ir\", \"*av*\", \"r?m\"");
             println!("  exit|quit     -> quit");

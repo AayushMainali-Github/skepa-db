@@ -1,5 +1,5 @@
-use crate::parser::command::{Assignment, Command};
 use super::where_clause::parse_where_clause;
+use crate::parser::command::{Assignment, Command};
 
 pub(super) fn parse_insert(tokens: &[String]) -> Result<Command, String> {
     // insert into <table> values (<v1>, <v2>, ...)
@@ -113,10 +113,7 @@ pub(super) fn parse_delete(tokens: &[String]) -> Result<Command, String> {
         return Err("Usage: delete from <table> where <expr>".to_string());
     }
 
-    let filter = parse_where_clause(
-        &tokens[4..],
-        "Usage: delete from <table> where <expr>",
-    )?;
+    let filter = parse_where_clause(&tokens[4..], "Usage: delete from <table> where <expr>")?;
     Ok(Command::Delete {
         table: tokens[2].clone(),
         filter,

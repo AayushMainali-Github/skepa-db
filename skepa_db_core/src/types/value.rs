@@ -20,14 +20,16 @@ pub enum Value {
     Blob(Vec<u8>),
 }
 
-pub fn parse_value(dtype: &DataType, token: &str) -> Result<Value, String>{
+pub fn parse_value(dtype: &DataType, token: &str) -> Result<Value, String> {
     if token.eq_ignore_ascii_case("null") {
         return Ok(Value::Null);
     }
     match dtype {
         DataType::Bool => parse_bool(token).map(Value::Bool),
         DataType::Int => {
-            let n: i64 = token.parse().map_err(|_| format!("Expected int but got '{token}'"))?;
+            let n: i64 = token
+                .parse()
+                .map_err(|_| format!("Expected int but got '{token}'"))?;
             Ok(Value::Int(n))
         }
         DataType::BigInt => {
@@ -61,7 +63,8 @@ pub fn parse_value(dtype: &DataType, token: &str) -> Result<Value, String>{
             Ok(Value::Timestamp(ts))
         }
         DataType::Uuid => {
-            let u = Uuid::parse_str(token).map_err(|_| format!("Expected uuid but got '{token}'"))?;
+            let u =
+                Uuid::parse_str(token).map_err(|_| format!("Expected uuid but got '{token}'"))?;
             Ok(Value::Uuid(u))
         }
         DataType::Json => {
