@@ -12,6 +12,7 @@ pub mod query_result;
 pub mod storage;
 pub mod types;
 
+mod legacy_render;
 mod recovery;
 mod transactions;
 
@@ -69,7 +70,7 @@ impl Database {
 
     pub fn execute_legacy(&mut self, input: &str) -> Result<String, String> {
         self.execute(input)
-            .map(|result| result.render())
+            .map(|result| legacy_render::render_query_result(&result))
             .map_err(|err| err.to_string())
     }
 

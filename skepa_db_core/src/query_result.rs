@@ -1,7 +1,6 @@
 use crate::execution_stats::ExecutionStats;
 use crate::storage::Schema;
 use crate::types::Row;
-use crate::types::value::value_to_string;
 
 #[derive(Debug, Clone)]
 pub enum QueryResult {
@@ -85,39 +84,6 @@ impl QueryResult {
         match self {
             Self::Mutation { rows_affected, .. } => Some(*rows_affected),
             _ => None,
-        }
-    }
-
-    pub fn render(&self) -> String {
-        match self {
-            Self::Select { schema, rows, .. } => {
-                let header = schema
-                    .columns
-                    .iter()
-                    .map(|c| c.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\t");
-
-                if rows.is_empty() {
-                    return header;
-                }
-
-                let row_lines = rows
-                    .iter()
-                    .map(|row| {
-                        row.iter()
-                            .map(value_to_string)
-                            .collect::<Vec<_>>()
-                            .join("\t")
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                format!("{header}\n{row_lines}")
-            }
-            Self::Mutation { message, .. } => message.clone(),
-            Self::SchemaChange { message, .. } => message.clone(),
-            Self::Transaction { message, .. } => message.clone(),
         }
     }
 }

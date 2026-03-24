@@ -1,6 +1,41 @@
 use skepa_db_core::Database;
 use skepa_db_core::parser::parser::parse;
+use skepa_db_core::query_result::QueryResult;
+use skepa_db_core::types::value::value_to_string;
 use std::io::{self, Write};
+
+fn render_query_result(result: &QueryResult) -> String {
+    match result {
+        QueryResult::Select { schema, rows, .. } => {
+            let header = schema
+                .columns
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>()
+                .join("\t");
+
+            if rows.is_empty() {
+                return header;
+            }
+
+            let row_lines = rows
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(value_to_string)
+                        .collect::<Vec<_>>()
+                        .join("\t")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            format!("{header}\n{row_lines}")
+        }
+        QueryResult::Mutation { message, .. } => message.clone(),
+        QueryResult::SchemaChange { message, .. } => message.clone(),
+        QueryResult::Transaction { message, .. } => message.clone(),
+    }
+}
 
 fn main() {
     let mut db = match Database::try_open("./mydb") {
@@ -77,7 +112,7 @@ fn main() {
         }
 
         match db.execute(input) {
-            Ok(out) => println!("{}", out.render()),
+            Ok(out) => println!("{}", render_query_result(&out)),
             Err(err) => println!("{err}"),
         }
     }
