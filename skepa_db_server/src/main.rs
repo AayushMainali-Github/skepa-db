@@ -87,14 +87,19 @@ async fn version() -> Json<VersionResponse> {
 }
 
 async fn execute(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(request): Json<ExecuteRequest>,
 ) -> Result<Json<ExecuteResponse>, (StatusCode, Json<ErrorResponse>)> {
     if request.sql.trim().is_empty() {
         return Err(error_response("sql must not be empty"));
     }
 
-    Err(error_response("execute endpoint not implemented yet"))
+    let mut db = state.db.lock().await;
+    let result = db
+        .execute(&request.sql)
+        .map_err(|error| error_response(error.to_string()))?;
+
+    Ok(Json(ExecuteResponse { ok: true, result }))
 }
 
 async fn batch(
