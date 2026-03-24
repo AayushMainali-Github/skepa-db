@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 skepa_db_core = { path = "../skepa_db_core" }
 anyhow = "1"
-
+serde_json = "1"

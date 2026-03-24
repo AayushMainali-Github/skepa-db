@@ -82,6 +82,7 @@ fn assert_schema_change_result(result: QueryResult, expected_message: &str) {
 }
 
 mod aggregates;
+mod api_json;
 mod basic;
 mod constraints;
 mod dml;
