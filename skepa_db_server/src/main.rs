@@ -1,10 +1,11 @@
-use axum::Json;
-use axum::Router;
 use axum::extract::State;
-use axum::routing::get;
-use serde::Serialize;
+use axum::http::StatusCode;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
 use skepa_db_core::Database;
 use skepa_db_core::config::DbConfig;
+use skepa_db_core::query_result::QueryResult;
 use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -31,12 +32,92 @@ struct HealthResponse {
     db_path: String,
 }
 
+#[derive(Debug, Serialize)]
+struct VersionResponse {
+    ok: bool,
+    version: &'static str,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExecuteRequest {
+    sql: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BatchRequest {
+    statements: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorResponse {
+    ok: bool,
+    error: ErrorBody,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorBody {
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ExecuteResponse {
+    ok: bool,
+    result: QueryResult,
+}
+
+#[derive(Debug, Serialize)]
+struct BatchResponse {
+    ok: bool,
+    results: Vec<QueryResult>,
+}
+
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let _db = state.db.lock().await;
     Json(HealthResponse {
         ok: true,
         db_path: state.config.db_path.display().to_string(),
     })
+}
+
+async fn version() -> Json<VersionResponse> {
+    Json(VersionResponse {
+        ok: true,
+        version: env!("CARGO_PKG_VERSION"),
+    })
+}
+
+async fn execute(
+    State(_state): State<AppState>,
+    Json(request): Json<ExecuteRequest>,
+) -> Result<Json<ExecuteResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if request.sql.trim().is_empty() {
+        return Err(error_response("sql must not be empty"));
+    }
+
+    Err(error_response("execute endpoint not implemented yet"))
+}
+
+async fn batch(
+    State(_state): State<AppState>,
+    Json(request): Json<BatchRequest>,
+) -> Result<Json<BatchResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if request.statements.is_empty() {
+        return Err(error_response("statements must not be empty"));
+    }
+
+    Err(error_response("batch endpoint not implemented yet"))
+}
+
+fn error_response(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse {
+            ok: false,
+            error: ErrorBody {
+                message: message.into(),
+            },
+        }),
+    )
 }
 
 fn parse_server_config() -> Result<ServerConfig, Box<dyn std::error::Error>> {
@@ -78,6 +159,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let app = Router::new()
         .route("/health", get(health))
+        .route("/version", get(version))
+        .route("/execute", post(execute))
+        .route("/batch", post(batch))
         .with_state(state.clone());
 
     info!(
