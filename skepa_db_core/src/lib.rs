@@ -3,11 +3,15 @@ use std::path::PathBuf;
 use std::{fs, io::Write};
 
 pub mod engine;
+pub mod error;
 pub mod parser;
+pub mod query_result;
 pub mod storage;
 pub mod types;
 
+use error::{DbError, DbResult};
 use parser::command::Command;
+use query_result::QueryResult;
 use storage::{Catalog, DiskStorage};
 
 #[derive(Debug, Clone)]
@@ -30,9 +34,9 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn open(path: impl Into<PathBuf>) -> Self {
+    pub fn try_open(path: impl Into<PathBuf>) -> DbResult<Self> {
         let path = path.into();
-        let storage = DiskStorage::new(path.clone()).expect("Failed to initialize disk storage");
+        let storage = DiskStorage::new(path.clone()).map_err(DbError::from)?;
         let catalog_path = path.join("catalog.json");
         let catalog = Catalog::load_from_path(&catalog_path).unwrap_or_else(|_| Catalog::new());
 
@@ -45,31 +49,46 @@ impl Database {
         };
 
         for (table, _) in db.catalog.snapshot_tables() {
-            let schema = db
-                .catalog
-                .schema(&table)
-                .expect("Missing schema while bootstrapping");
+            let schema = db.catalog.schema(&table).map_err(DbError::from)?;
             db.storage
                 .bootstrap_table(&table, schema)
-                .expect("Failed to bootstrap table in storage");
+                .map_err(DbError::from)?;
         }
 
-        db.replay_wal().expect("Failed to replay WAL");
-        db.checkpoint_and_truncate_wal()
-            .expect("Failed to checkpoint recovered state");
-        db
+        db.replay_wal().map_err(DbError::from)?;
+        db.checkpoint_and_truncate_wal().map_err(DbError::from)?;
+        Ok(db)
+    }
+
+    pub fn open(path: impl Into<PathBuf>) -> Self {
+        Self::try_open(path).expect("Failed to open database")
     }
 
     pub fn execute(&mut self, input: &str) -> Result<String, String> {
-        let cmd = parser::parser::parse(input)?;
+        self.execute_query(input)
+            .map(|result| result.render())
+            .map_err(|err| err.to_string())
+    }
+
+    pub fn execute_query(&mut self, input: &str) -> DbResult<QueryResult> {
+        let cmd = parser::parser::parse(input).map_err(DbError::from)?;
         if matches!(cmd, Command::Begin) {
-            return self.handle_begin();
+            return self
+                .handle_begin()
+                .map(QueryResult::message)
+                .map_err(DbError::from);
         }
         if matches!(cmd, Command::Commit) {
-            return self.handle_commit();
+            return self
+                .handle_commit()
+                .map(QueryResult::message)
+                .map_err(DbError::from);
         }
         if matches!(cmd, Command::Rollback) {
-            return self.handle_rollback();
+            return self
+                .handle_rollback()
+                .map(QueryResult::message)
+                .map_err(DbError::from);
         }
 
         if self.current_tx.is_some()
@@ -81,10 +100,10 @@ impl Database {
                     | Command::DropIndex { .. }
             )
         {
-            return Err(
+            return Err(DbError::from(
                 "CREATE/ALTER TABLE and CREATE/DROP INDEX are auto-commit and cannot run inside an active transaction"
                     .to_string(),
-            );
+            ));
         }
 
         let table_name = match &cmd {
@@ -122,7 +141,8 @@ impl Database {
             None
         };
 
-        let out = engine::execute_command(cmd, &mut self.catalog, &mut self.storage)?;
+        let out = engine::execute_command(cmd, &mut self.catalog, &mut self.storage)
+            .map_err(DbError::from)?;
 
         if let Some(tx) = &mut self.current_tx {
             if is_wal_write {
@@ -141,23 +161,26 @@ impl Database {
                 self.catalog = c;
                 self.storage = s;
             }
-            return Err(e);
+            return Err(DbError::from(e));
         }
 
         if is_schema_write {
-            self.save_catalog()?;
+            self.save_catalog().map_err(DbError::from)?;
             if let Some(table) = table_name {
-                self.storage.persist_table(&table)?;
+                self.storage.persist_table(&table).map_err(DbError::from)?;
             }
         } else if is_wal_write {
             let txid = self.alloc_txid();
-            self.append_wal_line(&format!("BEGIN {}", txid))?;
-            self.append_wal_line(&format!("OP {} {}", txid, input.trim()))?;
-            self.append_wal_line(&format!("COMMIT {}", txid))?;
+            self.append_wal_line(&format!("BEGIN {}", txid))
+                .map_err(DbError::from)?;
+            self.append_wal_line(&format!("OP {} {}", txid, input.trim()))
+                .map_err(DbError::from)?;
+            self.append_wal_line(&format!("COMMIT {}", txid))
+                .map_err(DbError::from)?;
             if let Some(table) = table_name {
-                self.storage.persist_table(&table)?;
+                self.storage.persist_table(&table).map_err(DbError::from)?;
             }
-            self.checkpoint_and_truncate_wal()?;
+            self.checkpoint_and_truncate_wal().map_err(DbError::from)?;
         }
 
         Ok(out)

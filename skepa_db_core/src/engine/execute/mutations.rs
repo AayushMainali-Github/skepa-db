@@ -4,7 +4,7 @@ fn handle_update(
     filter: WhereClause,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
-) -> Result<String, String> {
+) -> Result<QueryResult, String> {
     let schema = catalog.schema(&table)?;
 
     let mut compiled: Vec<(usize, Value)> = Vec::new();
@@ -87,7 +87,10 @@ fn handle_update(
     apply_on_update_cascade(catalog, storage, &table, schema, &old_rows, &post_parent_rows)?;
     storage.rebuild_indexes(&table, schema)?;
 
-    Ok(format!("updated {} row(s) in {}", updated, table))
+    Ok(QueryResult::message(format!(
+        "updated {} row(s) in {}",
+        updated, table
+    )))
 }
 
 fn handle_delete(
@@ -95,7 +98,7 @@ fn handle_delete(
     filter: WhereClause,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
-) -> Result<String, String> {
+) -> Result<QueryResult, String> {
     let schema = catalog.schema(&table)?;
     validate_where_columns(schema, &filter)?;
     let targeted_row_indices = if simple_eq_filter(&filter).is_some()
@@ -166,6 +169,9 @@ fn handle_delete(
     apply_on_delete_cascade(catalog, storage, &table, schema, &deleted_rows)?;
     storage.rebuild_indexes(&table, schema)?;
 
-    Ok(format!("deleted {} row(s) from {}", deleted, table))
+    Ok(QueryResult::message(format!(
+        "deleted {} row(s) from {}",
+        deleted, table
+    )))
 }
 

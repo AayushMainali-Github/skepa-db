@@ -3,15 +3,15 @@ fn handle_create_index(
     columns: Vec<String>,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
-) -> Result<String, String> {
+) -> Result<QueryResult, String> {
     catalog.add_secondary_index(&table, columns.clone())?;
     let schema = catalog.schema(&table)?;
     storage.rebuild_indexes(&table, schema)?;
-    Ok(format!(
+    Ok(QueryResult::message(format!(
         "created index on {}({})",
         table,
         columns.join(",")
-    ))
+    )))
 }
 
 fn handle_drop_index(
@@ -19,15 +19,15 @@ fn handle_drop_index(
     columns: Vec<String>,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
-) -> Result<String, String> {
+) -> Result<QueryResult, String> {
     catalog.drop_secondary_index(&table, &columns)?;
     let schema = catalog.schema(&table)?;
     storage.rebuild_indexes(&table, schema)?;
-    Ok(format!(
+    Ok(QueryResult::message(format!(
         "dropped index on {}({})",
         table,
         columns.join(",")
-    ))
+    )))
 }
 
 fn handle_alter(
@@ -35,22 +35,30 @@ fn handle_alter(
     action: AlterAction,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
-) -> Result<String, String> {
+) -> Result<QueryResult, String> {
     let before = catalog.clone();
     let result = match action {
-        AlterAction::AddUnique(cols) => (|| -> Result<String, String> {
+        AlterAction::AddUnique(cols) => (|| -> Result<QueryResult, String> {
             catalog.add_unique_constraint(&table, cols.clone())?;
             let schema = catalog.schema(&table)?;
             let rows = storage.scan(&table)?;
             validate_all_unique_constraints(schema, rows)?;
             storage.rebuild_indexes(&table, schema)?;
-            Ok(format!("altered table {}: added unique({})", table, cols.join(",")))
+            Ok(QueryResult::message(format!(
+                "altered table {}: added unique({})",
+                table,
+                cols.join(",")
+            )))
         })(),
-        AlterAction::DropUnique(cols) => (|| -> Result<String, String> {
+        AlterAction::DropUnique(cols) => (|| -> Result<QueryResult, String> {
             catalog.drop_unique_constraint(&table, &cols)?;
             let schema = catalog.schema(&table)?;
             storage.rebuild_indexes(&table, schema)?;
-            Ok(format!("altered table {}: dropped unique({})", table, cols.join(",")))
+            Ok(QueryResult::message(format!(
+                "altered table {}: dropped unique({})",
+                table,
+                cols.join(",")
+            )))
         })(),
         AlterAction::AddForeignKey {
             columns,
@@ -58,7 +66,7 @@ fn handle_alter(
             ref_columns,
             on_delete,
             on_update,
-        } => (|| -> Result<String, String> {
+        } => (|| -> Result<QueryResult, String> {
             catalog.add_foreign_key_constraint(
                 &table,
                 ForeignKeyDef {
@@ -72,38 +80,44 @@ fn handle_alter(
             let schema = catalog.schema(&table)?;
             let rows = storage.scan(&table)?;
             validate_all_foreign_keys(catalog, storage, schema, rows)?;
-            Ok(format!(
+            Ok(QueryResult::message(format!(
                 "altered table {}: added foreign key({}) references {}({})",
                 table,
                 columns.join(","),
                 ref_table,
                 ref_columns.join(",")
-            ))
+            )))
         })(),
         AlterAction::DropForeignKey {
             columns,
             ref_table,
             ref_columns,
-        } => (|| -> Result<String, String> {
+        } => (|| -> Result<QueryResult, String> {
             catalog.drop_foreign_key_constraint(&table, &columns, &ref_table, &ref_columns)?;
-            Ok(format!(
+            Ok(QueryResult::message(format!(
                 "altered table {}: dropped foreign key({}) references {}({})",
                 table,
                 columns.join(","),
                 ref_table,
                 ref_columns.join(",")
-            ))
+            )))
         })(),
-        AlterAction::SetNotNull(col) => (|| -> Result<String, String> {
+        AlterAction::SetNotNull(col) => (|| -> Result<QueryResult, String> {
             catalog.set_not_null(&table, &col, true)?;
             let schema = catalog.schema(&table)?;
             let rows = storage.scan(&table)?;
             validate_not_null_columns(schema, rows)?;
-            Ok(format!("altered table {}: set {} not null", table, col))
+            Ok(QueryResult::message(format!(
+                "altered table {}: set {} not null",
+                table, col
+            )))
         })(),
-        AlterAction::DropNotNull(col) => (|| -> Result<String, String> {
+        AlterAction::DropNotNull(col) => (|| -> Result<QueryResult, String> {
             catalog.set_not_null(&table, &col, false)?;
-            Ok(format!("altered table {}: dropped not null on {}", table, col))
+            Ok(QueryResult::message(format!(
+                "altered table {}: dropped not null on {}",
+                table, col
+            )))
         })(),
     };
     if result.is_err() {
@@ -111,4 +125,3 @@ fn handle_alter(
     }
     result
 }
-

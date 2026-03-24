@@ -3,13 +3,22 @@ use skepa_db_core::parser::parser::parse;
 use std::io::{self, Write};
 
 fn main() {
-    let mut db = Database::open("./mydb");
+    let mut db = match Database::try_open("./mydb") {
+        Ok(db) => db,
+        Err(err) => {
+            eprintln!("Failed to open database: {err}");
+            std::process::exit(1);
+        }
+    };
 
     println!("skepa_db_cli (type 'help' or 'exit')");
 
     loop {
         print!("db> ");
-        io::stdout().flush().unwrap();
+        if let Err(err) = io::stdout().flush() {
+            eprintln!("Failed to flush prompt: {err}");
+            break;
+        }
 
         let mut line = String::new();
         if io::stdin().read_line(&mut line).is_err() {
@@ -67,8 +76,8 @@ fn main() {
             continue;
         }
 
-        match db.execute(input) {
-            Ok(out) => println!("{out}"),
+        match db.execute_query(input) {
+            Ok(out) => println!("{}", out.render()),
             Err(err) => println!("{err}"),
         }
     }

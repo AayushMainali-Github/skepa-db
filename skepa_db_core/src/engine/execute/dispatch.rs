@@ -2,7 +2,7 @@ pub fn execute_command(
     cmd: Command,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
-) -> Result<String, String> {
+) -> Result<QueryResult, String> {
     match cmd {
         Command::Create {
             table,

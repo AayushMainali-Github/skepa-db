@@ -12,7 +12,7 @@ fn handle_select(
     offset: Option<usize>,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
-) -> Result<String, String> {
+) -> Result<QueryResult, String> {
     let is_join = join.is_some();
     let (select_schema, base_rows): (Schema, Vec<Row>) = if let Some(join_clause) = join {
         build_join_rows(catalog, storage, &table, &join_clause)?
@@ -112,7 +112,7 @@ fn handle_select(
         } else {
             ordered_rows.into_iter().skip(start).collect::<Vec<_>>()
         };
-        return Ok(format_select(&post_schema, &sliced_rows));
+        return Ok(QueryResult::table(post_schema, sliced_rows));
     }
 
     if having.is_some() {
@@ -144,7 +144,7 @@ fn handle_select(
         } else {
             distinct_rows.into_iter().skip(start).collect::<Vec<_>>()
         };
-        return Ok(format_select(&out_schema, &limited_rows));
+        return Ok(QueryResult::table(out_schema, limited_rows));
     }
 
     let mut ordered_rows = filtered_rows;
@@ -207,7 +207,7 @@ fn handle_select(
     };
 
     let (out_schema, out_rows) = project_rows(&select_schema, &limited_rows, columns.as_ref())?;
-    Ok(format_select(&out_schema, &out_rows))
+    Ok(QueryResult::table(out_schema, out_rows))
 }
 
 fn dedupe_rows(rows: Vec<Row>) -> Vec<Row> {

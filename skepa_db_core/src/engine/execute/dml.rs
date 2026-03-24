@@ -4,10 +4,10 @@ fn handle_create(
     table_constraints: Vec<TableConstraintDef>,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
-) -> Result<String, String> {
+) -> Result<QueryResult, String> {
     catalog.create_table(table.clone(), columns, table_constraints)?;
     storage.create_table(&table)?;
-    Ok(format!("created table {}", table))
+    Ok(QueryResult::message(format!("created table {}", table)))
 }
 
 fn handle_insert(
@@ -15,7 +15,7 @@ fn handle_insert(
     values: Vec<String>,
     catalog: &mut Catalog,
     storage: &mut dyn StorageEngine,
-) -> Result<String, String> {
+) -> Result<QueryResult, String> {
     let schema = catalog.schema(&table)?;
 
     if values.len() != schema.column_count() {
@@ -60,6 +60,6 @@ fn handle_insert(
 
     storage.insert_row(&table, row)?;
     storage.rebuild_indexes(&table, schema)?;
-    Ok(format!("inserted 1 row into {}", table))
+    Ok(QueryResult::message(format!("inserted 1 row into {}", table)))
 }
 

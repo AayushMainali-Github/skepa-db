@@ -1,8 +1,8 @@
-use crate::engine::format::format_select;
 use crate::parser::command::{
     AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, JoinType,
     LogicalOp, OrderBy, TableConstraintDef, WhereClause,
 };
+use crate::query_result::QueryResult;
 use crate::storage::schema::ForeignKeyDef;
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
 use crate::types::Row;
