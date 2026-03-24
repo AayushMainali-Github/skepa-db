@@ -7,14 +7,14 @@ fn test_constraint_persistence_after_reopen() {
     let _ = std::fs::remove_dir_all(&path);
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         db.execute("create table t (id int primary key, email text unique, name text not null)")
             .unwrap();
         db.execute(r#"insert into t values (1, "a@x.com", "ram")"#)
             .unwrap();
     }
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         let e1 = db
             .execute(r#"insert into t values (1, "b@x.com", "bob")"#)
             .unwrap_err();
@@ -38,7 +38,7 @@ fn test_persistence_reopen_insert() {
     let _ = std::fs::remove_dir_all(&path);
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         db.execute("create table users (id int, name text)")
             .unwrap();
         db.execute(r#"insert into users values (1, "ram")"#)
@@ -46,7 +46,7 @@ fn test_persistence_reopen_insert() {
     }
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         let out = db.execute("select * from users").unwrap();
         assert_eq!(out, "id\tname\n1\tram");
     }
@@ -61,7 +61,7 @@ fn test_persistence_reopen_update_delete() {
     let _ = std::fs::remove_dir_all(&path);
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         db.execute("create table users (id int, name text, age int)")
             .unwrap();
         db.execute(r#"insert into users values (1, "ram", 20)"#)
@@ -75,7 +75,7 @@ fn test_persistence_reopen_update_delete() {
     }
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         let out = db.execute("select * from users").unwrap();
         assert_eq!(out, "id\tname\tage\n1\tram\t99");
     }
@@ -93,14 +93,14 @@ fn test_composite_pk_persists_and_rejects_after_reopen() {
     let _ = std::fs::remove_dir_all(&path);
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         db.execute("create table t (a int, b int, primary key(a,b))")
             .unwrap();
         db.execute("insert into t values (1, 1)").unwrap();
     }
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         let err = db.execute("insert into t values (1, 1)").unwrap_err();
         assert!(err.to_lowercase().contains("primary key"));
     }

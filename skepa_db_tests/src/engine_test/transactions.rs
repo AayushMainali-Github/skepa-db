@@ -82,7 +82,7 @@ fn test_transaction_commit_persists_after_reopen() {
     let _ = std::fs::remove_dir_all(&path);
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         db.execute("create table users (id int, name text)")
             .unwrap();
         db.execute("begin").unwrap();
@@ -92,7 +92,7 @@ fn test_transaction_commit_persists_after_reopen() {
     }
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         assert_eq!(
             db.execute("select * from users").unwrap(),
             "id\tname\n1\tram"
@@ -109,7 +109,7 @@ fn test_transaction_rollback_not_persisted_after_reopen() {
     let _ = std::fs::remove_dir_all(&path);
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         db.execute("create table users (id int, name text)")
             .unwrap();
         db.execute("begin").unwrap();
@@ -119,7 +119,7 @@ fn test_transaction_rollback_not_persisted_after_reopen() {
     }
 
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         assert_eq!(db.execute("select * from users").unwrap(), "id\tname");
     }
 
@@ -153,13 +153,13 @@ fn test_transaction_commit_conflict_when_table_changed_externally() {
     let _ = std::fs::remove_dir_all(&path);
 
     {
-        let mut setup = Database::open(path.clone());
+        let mut setup = Database::open_legacy(path.clone());
         setup.execute("create table t (id int, v int)").unwrap();
         setup.execute("insert into t values (1, 10)").unwrap();
     }
 
-    let mut tx_db = Database::open(path.clone());
-    let mut other_db = Database::open(path.clone());
+    let mut tx_db = Database::open_legacy(path.clone());
+    let mut other_db = Database::open_legacy(path.clone());
 
     tx_db.execute("begin").unwrap();
     tx_db.execute("update t set v = 11 where id = 1").unwrap();
@@ -183,15 +183,15 @@ fn test_transaction_commit_no_conflict_when_other_table_changes() {
     let _ = std::fs::remove_dir_all(&path);
 
     {
-        let mut setup = Database::open(path.clone());
+        let mut setup = Database::open_legacy(path.clone());
         setup.execute("create table a (id int, v int)").unwrap();
         setup.execute("create table b (id int, v int)").unwrap();
         setup.execute("insert into a values (1, 10)").unwrap();
         setup.execute("insert into b values (1, 100)").unwrap();
     }
 
-    let mut tx_db = Database::open(path.clone());
-    let mut other_db = Database::open(path.clone());
+    let mut tx_db = Database::open_legacy(path.clone());
+    let mut other_db = Database::open_legacy(path.clone());
 
     tx_db.execute("begin").unwrap();
     tx_db.execute("update a set v = 11 where id = 1").unwrap();

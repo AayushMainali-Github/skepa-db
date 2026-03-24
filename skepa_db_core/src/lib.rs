@@ -3,6 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::{fs, io::Write};
 
+pub mod config;
 pub mod engine;
 pub mod error;
 pub mod parser;
@@ -10,6 +11,7 @@ pub mod query_result;
 pub mod storage;
 pub mod types;
 
+use config::DbConfig;
 use error::{DbError, DbResult};
 use parser::command::Command;
 use query_result::QueryResult;
@@ -35,8 +37,8 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn try_open(path: impl Into<PathBuf>) -> DbResult<Self> {
-        let path = path.into();
+    pub fn open(config: DbConfig) -> DbResult<Self> {
+        let path = config.path;
         let storage = Self::initialize_storage(&path)?;
         let catalog = Self::load_catalog(&path);
 
@@ -53,7 +55,11 @@ impl Database {
         Ok(db)
     }
 
-    pub fn open(path: impl Into<PathBuf>) -> Self {
+    pub fn try_open(path: impl Into<PathBuf>) -> DbResult<Self> {
+        Self::open(DbConfig::new(path))
+    }
+
+    pub fn open_legacy(path: impl Into<PathBuf>) -> Self {
         Self::try_open(path).expect("Failed to open database")
     }
 

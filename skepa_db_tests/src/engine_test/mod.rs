@@ -9,7 +9,7 @@ fn test_db() -> Database {
     let mut path: PathBuf = std::env::temp_dir();
     path.push(format!("skepa_db_test_{}_{}", std::process::id(), id));
     let _ = std::fs::remove_dir_all(&path);
-    Database::open(path)
+    Database::open_legacy(path)
 }
 
 fn seed_users_3(db: &mut Database) {

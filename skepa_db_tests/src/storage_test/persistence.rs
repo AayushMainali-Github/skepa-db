@@ -104,21 +104,21 @@ fn checkpoint_writes_table_files() {
 fn reopen_is_idempotent_no_duplicate_rows() {
     let path = temp_dir("reopen_idempotent");
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         db.execute("create table users (id int, name text)")
             .unwrap();
         db.execute(r#"insert into users values (1, "ram")"#)
             .unwrap();
     }
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         assert_eq!(
             db.execute("select * from users").unwrap(),
             "id\tname\n1\tram"
         );
     }
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         assert_eq!(
             db.execute("select * from users").unwrap(),
             "id\tname\n1\tram"
@@ -130,14 +130,14 @@ fn reopen_is_idempotent_no_duplicate_rows() {
 fn persistence_roundtrip_extended_types() {
     let path = temp_dir("persist_ext");
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         db.execute("create table t (b bool, bi bigint, d decimal(6,2), v varchar(5), dt date, ts timestamp, u uuid, j json, bl blob)")
             .unwrap();
         db.execute(r#"insert into t values (true, 123456, 12.34, "hello", 2025-01-02, "2025-01-02 03:04:05", 550e8400-e29b-41d4-a716-446655440000, "{\"k\":1}", 0xABCD)"#)
             .unwrap();
     }
     {
-        let mut db = Database::open(path.clone());
+        let mut db = Database::open_legacy(path.clone());
         let out = db.execute("select * from t").unwrap();
         assert!(out.contains("true"));
         assert!(out.contains("123456"));
@@ -154,12 +154,12 @@ fn persistence_roundtrip_extended_types() {
 fn diskstorage_persists_null_values_roundtrip() {
     let root = temp_dir("null_roundtrip");
     {
-        let mut db = Database::open(root.clone());
+        let mut db = Database::open_legacy(root.clone());
         db.execute("create table t (id int, name text)").unwrap();
         db.execute("insert into t values (1, null)").unwrap();
     }
     {
-        let mut db = Database::open(root.clone());
+        let mut db = Database::open_legacy(root.clone());
         assert_eq!(db.execute("select * from t").unwrap(), "id\tname\n1\tnull");
     }
 }
