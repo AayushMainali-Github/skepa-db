@@ -1,8 +1,9 @@
 use crate::execution_stats::ExecutionStats;
 use crate::storage::Schema;
 use crate::types::Row;
+use serde::Serialize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum QueryResult {
     Select {
         schema: Schema,

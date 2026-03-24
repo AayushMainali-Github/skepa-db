@@ -1,6 +1,7 @@
 use crate::types::datatype::DataType;
+use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum CompareOp {
     Eq,
     Gt,
@@ -13,20 +14,20 @@ pub enum CompareOp {
     IsNotNull,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum LogicalOp {
     And,
     Or,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Predicate {
     pub column: String,
     pub op: CompareOp,
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum WhereClause {
     Predicate(Predicate),
     Binary {
@@ -36,26 +37,26 @@ pub enum WhereClause {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Assignment {
     pub column: String,
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OrderBy {
     pub column: String,
     pub asc: bool,
     pub then_by: Vec<(String, bool)>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum JoinType {
     Inner,
     Left,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct JoinClause {
     pub join_type: JoinType,
     pub table: String,
@@ -63,7 +64,7 @@ pub struct JoinClause {
     pub right_column: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ColumnDef {
     pub name: String,
     pub dtype: DataType,
@@ -72,7 +73,7 @@ pub struct ColumnDef {
     pub not_null: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum TableConstraintDef {
     PrimaryKey(Vec<String>),
     Unique(Vec<String>),
@@ -85,7 +86,7 @@ pub enum TableConstraintDef {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ForeignKeyAction {
     Restrict,
     Cascade,
@@ -93,7 +94,7 @@ pub enum ForeignKeyAction {
     NoAction,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum AlterAction {
     AddUnique(Vec<String>),
     DropUnique(Vec<String>),

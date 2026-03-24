@@ -1,6 +1,8 @@
 use crate::types::datatype::DataType;
 use chrono::{NaiveDate, NaiveDateTime};
 use rust_decimal::Decimal;
+use serde::ser::SerializeSeq;
+use serde::{Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
@@ -18,6 +20,35 @@ pub enum Value {
     Uuid(Uuid),
     Json(JsonValue),
     Blob(Vec<u8>),
+}
+
+impl Serialize for Value {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Value::Null => serializer.serialize_none(),
+            Value::Bool(value) => serializer.serialize_bool(*value),
+            Value::Int(value) => serializer.serialize_i64(*value),
+            Value::BigInt(value) => serializer.serialize_str(&value.to_string()),
+            Value::Decimal(value) => serializer.serialize_str(&value.normalize().to_string()),
+            Value::VarChar(value) | Value::Text(value) => serializer.serialize_str(value),
+            Value::Date(value) => serializer.serialize_str(&value.format("%Y-%m-%d").to_string()),
+            Value::Timestamp(value) => {
+                serializer.serialize_str(&value.format("%Y-%m-%d %H:%M:%S").to_string())
+            }
+            Value::Uuid(value) => serializer.serialize_str(&value.to_string()),
+            Value::Json(value) => value.serialize(serializer),
+            Value::Blob(bytes) => {
+                let mut seq = serializer.serialize_seq(Some(bytes.len()))?;
+                for byte in bytes {
+                    seq.serialize_element(byte)?;
+                }
+                seq.end()
+            }
+        }
+    }
 }
 
 pub fn parse_value(dtype: &DataType, token: &str) -> Result<Value, String> {
