@@ -7,7 +7,7 @@ fn handle_create_index(
     catalog.add_secondary_index(&table, columns.clone())?;
     let schema = catalog.schema(&table)?;
     storage.rebuild_indexes(&table, schema)?;
-    Ok(QueryResult::message(format!(
+    Ok(QueryResult::schema_change(format!(
         "created index on {}({})",
         table,
         columns.join(",")
@@ -23,7 +23,7 @@ fn handle_drop_index(
     catalog.drop_secondary_index(&table, &columns)?;
     let schema = catalog.schema(&table)?;
     storage.rebuild_indexes(&table, schema)?;
-    Ok(QueryResult::message(format!(
+    Ok(QueryResult::schema_change(format!(
         "dropped index on {}({})",
         table,
         columns.join(",")
@@ -44,7 +44,7 @@ fn handle_alter(
             let rows = storage.scan(&table)?;
             validate_all_unique_constraints(schema, rows)?;
             storage.rebuild_indexes(&table, schema)?;
-            Ok(QueryResult::message(format!(
+            Ok(QueryResult::schema_change(format!(
                 "altered table {}: added unique({})",
                 table,
                 cols.join(",")
@@ -54,7 +54,7 @@ fn handle_alter(
             catalog.drop_unique_constraint(&table, &cols)?;
             let schema = catalog.schema(&table)?;
             storage.rebuild_indexes(&table, schema)?;
-            Ok(QueryResult::message(format!(
+            Ok(QueryResult::schema_change(format!(
                 "altered table {}: dropped unique({})",
                 table,
                 cols.join(",")
@@ -80,7 +80,7 @@ fn handle_alter(
             let schema = catalog.schema(&table)?;
             let rows = storage.scan(&table)?;
             validate_all_foreign_keys(catalog, storage, schema, rows)?;
-            Ok(QueryResult::message(format!(
+            Ok(QueryResult::schema_change(format!(
                 "altered table {}: added foreign key({}) references {}({})",
                 table,
                 columns.join(","),
@@ -94,7 +94,7 @@ fn handle_alter(
             ref_columns,
         } => (|| -> Result<QueryResult, String> {
             catalog.drop_foreign_key_constraint(&table, &columns, &ref_table, &ref_columns)?;
-            Ok(QueryResult::message(format!(
+            Ok(QueryResult::schema_change(format!(
                 "altered table {}: dropped foreign key({}) references {}({})",
                 table,
                 columns.join(","),
@@ -107,14 +107,14 @@ fn handle_alter(
             let schema = catalog.schema(&table)?;
             let rows = storage.scan(&table)?;
             validate_not_null_columns(schema, rows)?;
-            Ok(QueryResult::message(format!(
+            Ok(QueryResult::schema_change(format!(
                 "altered table {}: set {} not null",
                 table, col
             )))
         })(),
         AlterAction::DropNotNull(col) => (|| -> Result<QueryResult, String> {
             catalog.set_not_null(&table, &col, false)?;
-            Ok(QueryResult::message(format!(
+            Ok(QueryResult::schema_change(format!(
                 "altered table {}: dropped not null on {}",
                 table, col
             )))

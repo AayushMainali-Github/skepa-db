@@ -87,10 +87,10 @@ fn handle_update(
     apply_on_update_cascade(catalog, storage, &table, schema, &old_rows, &post_parent_rows)?;
     storage.rebuild_indexes(&table, schema)?;
 
-    Ok(QueryResult::message(format!(
-        "updated {} row(s) in {}",
-        updated, table
-    )))
+    Ok(QueryResult::mutation(
+        format!("updated {} row(s) in {}", updated, table),
+        updated,
+    ))
 }
 
 fn handle_delete(
@@ -169,9 +169,9 @@ fn handle_delete(
     apply_on_delete_cascade(catalog, storage, &table, schema, &deleted_rows)?;
     storage.rebuild_indexes(&table, schema)?;
 
-    Ok(QueryResult::message(format!(
-        "deleted {} row(s) from {}",
-        deleted, table
-    )))
+    Ok(QueryResult::mutation(
+        format!("deleted {} row(s) from {}", deleted, table),
+        deleted,
+    ))
 }
 

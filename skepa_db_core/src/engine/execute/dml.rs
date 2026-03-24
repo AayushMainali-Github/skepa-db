@@ -7,7 +7,7 @@ fn handle_create(
 ) -> Result<QueryResult, String> {
     catalog.create_table(table.clone(), columns, table_constraints)?;
     storage.create_table(&table)?;
-    Ok(QueryResult::message(format!("created table {}", table)))
+    Ok(QueryResult::schema_change(format!("created table {}", table)))
 }
 
 fn handle_insert(
@@ -60,6 +60,9 @@ fn handle_insert(
 
     storage.insert_row(&table, row)?;
     storage.rebuild_indexes(&table, schema)?;
-    Ok(QueryResult::message(format!("inserted 1 row into {}", table)))
+    Ok(QueryResult::mutation(
+        format!("inserted 1 row into {}", table),
+        1,
+    ))
 }
 

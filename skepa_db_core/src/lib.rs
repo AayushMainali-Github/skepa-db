@@ -78,19 +78,19 @@ impl Database {
         if matches!(cmd, Command::Begin) {
             return self
                 .handle_begin()
-                .map(QueryResult::message)
+                .map(QueryResult::transaction)
                 .map_err(DbError::from);
         }
         if matches!(cmd, Command::Commit) {
             return self
                 .handle_commit()
-                .map(QueryResult::message)
+                .map(QueryResult::transaction)
                 .map_err(DbError::from);
         }
         if matches!(cmd, Command::Rollback) {
             return self
                 .handle_rollback()
-                .map(QueryResult::message)
+                .map(QueryResult::transaction)
                 .map_err(DbError::from);
         }
 
