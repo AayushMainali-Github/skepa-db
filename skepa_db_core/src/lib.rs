@@ -63,13 +63,13 @@ impl Database {
         Self::try_open(path).expect("Failed to open database")
     }
 
-    pub fn execute(&mut self, input: &str) -> Result<String, String> {
-        self.execute_query(input)
+    pub fn execute_legacy(&mut self, input: &str) -> Result<String, String> {
+        self.execute(input)
             .map(|result| result.render())
             .map_err(|err| err.to_string())
     }
 
-    pub fn execute_query(&mut self, input: &str) -> DbResult<QueryResult> {
+    pub fn execute(&mut self, input: &str) -> DbResult<QueryResult> {
         let cmd = parser::parser::parse(input).map_err(DbError::from)?;
         if matches!(cmd, Command::Begin) {
             return self

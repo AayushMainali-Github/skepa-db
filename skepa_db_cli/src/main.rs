@@ -76,7 +76,7 @@ fn main() {
             continue;
         }
 
-        match db.execute_query(input) {
+        match db.execute(input) {
             Ok(out) => println!("{}", out.render()),
             Err(err) => println!("{err}"),
         }

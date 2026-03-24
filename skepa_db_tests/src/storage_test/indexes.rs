@@ -5,11 +5,11 @@ fn index_snapshot_file_is_written_on_persist() {
     let path = temp_dir("index_snapshot_written");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int primary key, email text unique, name text)")
+        db.execute_legacy("create table users (id int primary key, email text unique, name text)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "a@x.com", "a")"#)
+        db.execute_legacy(r#"insert into users values (1, "a@x.com", "a")"#)
             .unwrap();
-        db.execute(r#"insert into users values (2, "b@x.com", "b")"#)
+        db.execute_legacy(r#"insert into users values (2, "b@x.com", "b")"#)
             .unwrap();
     }
 
@@ -25,11 +25,11 @@ fn corrupt_index_file_falls_back_to_rebuild_on_open() {
     let path = temp_dir("index_corrupt_fallback");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int primary key, email text unique)")
+        db.execute_legacy("create table users (id int primary key, email text unique)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "a@x.com")"#)
+        db.execute_legacy(r#"insert into users values (1, "a@x.com")"#)
             .unwrap();
-        db.execute(r#"insert into users values (2, "b@x.com")"#)
+        db.execute_legacy(r#"insert into users values (2, "b@x.com")"#)
             .unwrap();
     }
 
@@ -39,11 +39,12 @@ fn corrupt_index_file_falls_back_to_rebuild_on_open() {
     {
         let mut db = Database::open_legacy(path.clone());
         assert_eq!(
-            db.execute(r#"select * from users where id = 2"#).unwrap(),
+            db.execute_legacy(r#"select * from users where id = 2"#)
+                .unwrap(),
             "id\temail\n2\tb@x.com"
         );
         assert_eq!(
-            db.execute(r#"select * from users where email = "a@x.com""#)
+            db.execute_legacy(r#"select * from users where email = "a@x.com""#)
                 .unwrap(),
             "id\temail\n1\ta@x.com"
         );
@@ -55,11 +56,11 @@ fn duplicate_key_in_index_snapshot_self_heals() {
     let path = temp_dir("index_dup_key_heal");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int primary key, email text unique)")
+        db.execute_legacy("create table users (id int primary key, email text unique)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "a@x.com")"#)
+        db.execute_legacy(r#"insert into users values (1, "a@x.com")"#)
             .unwrap();
-        db.execute(r#"insert into users values (2, "b@x.com")"#)
+        db.execute_legacy(r#"insert into users values (2, "b@x.com")"#)
             .unwrap();
     }
 
@@ -83,7 +84,8 @@ fn duplicate_key_in_index_snapshot_self_heals() {
     {
         let mut db = Database::open_legacy(path.clone());
         assert_eq!(
-            db.execute("select * from users where id = 2").unwrap(),
+            db.execute_legacy("select * from users where id = 2")
+                .unwrap(),
             "id\temail\n2\tb@x.com"
         );
     }
@@ -99,9 +101,9 @@ fn out_of_range_row_pointer_in_index_snapshot_self_heals() {
     let path = temp_dir("index_row_ptr_heal");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int primary key, email text unique)")
+        db.execute_legacy("create table users (id int primary key, email text unique)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "a@x.com")"#)
+        db.execute_legacy(r#"insert into users values (1, "a@x.com")"#)
             .unwrap();
     }
 
@@ -123,7 +125,8 @@ fn out_of_range_row_pointer_in_index_snapshot_self_heals() {
     {
         let mut db = Database::open_legacy(path.clone());
         assert_eq!(
-            db.execute("select * from users where id = 1").unwrap(),
+            db.execute_legacy("select * from users where id = 1")
+                .unwrap(),
             "id\temail\n1\ta@x.com"
         );
     }
@@ -143,7 +146,7 @@ fn index_directory_exists_after_db_open() {
 fn index_file_created_on_create_table() {
     let path = temp_dir("index_file_create_table");
     let mut db = Database::open_legacy(path.clone());
-    db.execute("create table users (id int primary key)")
+    db.execute_legacy("create table users (id int primary key)")
         .unwrap();
     assert!(path.join("indexes").join("users.indexes.json").exists());
 }
@@ -153,16 +156,17 @@ fn empty_index_file_triggers_rebuild_fallback() {
     let path = temp_dir("index_empty_fallback");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int primary key, email text unique)")
+        db.execute_legacy("create table users (id int primary key, email text unique)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "a@x.com")"#)
+        db.execute_legacy(r#"insert into users values (1, "a@x.com")"#)
             .unwrap();
     }
     std::fs::write(path.join("indexes").join("users.indexes.json"), "").unwrap();
     {
         let mut db = Database::open_legacy(path.clone());
         assert_eq!(
-            db.execute("select * from users where id = 1").unwrap(),
+            db.execute_legacy("select * from users where id = 1")
+                .unwrap(),
             "id\temail\n1\ta@x.com"
         );
     }
@@ -173,10 +177,12 @@ fn pk_index_snapshot_uses_row_id_field() {
     let path = temp_dir("pk_index_row_id_field");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table t (id int primary key, v text)")
+        db.execute_legacy("create table t (id int primary key, v text)")
             .unwrap();
-        db.execute(r#"insert into t values (1, "a")"#).unwrap();
-        db.execute(r#"insert into t values (2, "b")"#).unwrap();
+        db.execute_legacy(r#"insert into t values (1, "a")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into t values (2, "b")"#)
+            .unwrap();
     }
     let content = std::fs::read_to_string(path.join("indexes").join("t.indexes.json")).unwrap();
     assert!(content.contains("\"row_id\""));
@@ -188,9 +194,9 @@ fn unique_index_snapshot_uses_row_id_field() {
     let path = temp_dir("uq_index_row_id_field");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table t (id int, email text unique)")
+        db.execute_legacy("create table t (id int, email text unique)")
             .unwrap();
-        db.execute(r#"insert into t values (1, "a@x.com")"#)
+        db.execute_legacy(r#"insert into t values (1, "a@x.com")"#)
             .unwrap();
     }
     let content = std::fs::read_to_string(path.join("indexes").join("t.indexes.json")).unwrap();
@@ -203,17 +209,20 @@ fn pk_lookup_still_works_after_middle_delete_and_reopen() {
     let path = temp_dir("pk_lookup_after_delete_reopen");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table t (id int primary key, v text)")
+        db.execute_legacy("create table t (id int primary key, v text)")
             .unwrap();
-        db.execute(r#"insert into t values (1, "a")"#).unwrap();
-        db.execute(r#"insert into t values (2, "b")"#).unwrap();
-        db.execute(r#"insert into t values (3, "c")"#).unwrap();
-        db.execute("delete from t where id = 2").unwrap();
+        db.execute_legacy(r#"insert into t values (1, "a")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into t values (2, "b")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into t values (3, "c")"#)
+            .unwrap();
+        db.execute_legacy("delete from t where id = 2").unwrap();
     }
     {
         let mut db = Database::open_legacy(path.clone());
         assert_eq!(
-            db.execute("select * from t where id = 3").unwrap(),
+            db.execute_legacy("select * from t where id = 3").unwrap(),
             "id\tv\n3\tc"
         );
     }
@@ -224,21 +233,21 @@ fn unique_lookup_still_works_after_middle_delete_and_reopen() {
     let path = temp_dir("uq_lookup_after_delete_reopen");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table t (id int, email text unique)")
+        db.execute_legacy("create table t (id int, email text unique)")
             .unwrap();
-        db.execute(r#"insert into t values (1, "a@x.com")"#)
+        db.execute_legacy(r#"insert into t values (1, "a@x.com")"#)
             .unwrap();
-        db.execute(r#"insert into t values (2, "b@x.com")"#)
+        db.execute_legacy(r#"insert into t values (2, "b@x.com")"#)
             .unwrap();
-        db.execute(r#"insert into t values (3, "c@x.com")"#)
+        db.execute_legacy(r#"insert into t values (3, "c@x.com")"#)
             .unwrap();
-        db.execute(r#"delete from t where email = "b@x.com""#)
+        db.execute_legacy(r#"delete from t where email = "b@x.com""#)
             .unwrap();
     }
     {
         let mut db = Database::open_legacy(path.clone());
         assert_eq!(
-            db.execute(r#"select * from t where email = "c@x.com""#)
+            db.execute_legacy(r#"select * from t where email = "c@x.com""#)
                 .unwrap(),
             "id\temail\n3\tc@x.com"
         );
@@ -250,8 +259,9 @@ fn pk_index_self_heal_when_snapshot_references_unknown_row_id() {
     let path = temp_dir("pk_unknown_row_id_heal");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table t (id int primary key)").unwrap();
-        db.execute("insert into t values (1)").unwrap();
+        db.execute_legacy("create table t (id int primary key)")
+            .unwrap();
+        db.execute_legacy("insert into t values (1)").unwrap();
     }
     std::fs::write(
         path.join("indexes").join("t.indexes.json"),
@@ -263,7 +273,10 @@ fn pk_index_self_heal_when_snapshot_references_unknown_row_id() {
     .unwrap();
     {
         let mut db = Database::open_legacy(path.clone());
-        assert_eq!(db.execute("select * from t where id = 1").unwrap(), "id\n1");
+        assert_eq!(
+            db.execute_legacy("select * from t where id = 1").unwrap(),
+            "id\n1"
+        );
     }
 }
 
@@ -272,9 +285,9 @@ fn unique_index_self_heal_when_snapshot_references_unknown_row_id() {
     let path = temp_dir("uq_unknown_row_id_heal");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table t (id int, email text unique)")
+        db.execute_legacy("create table t (id int, email text unique)")
             .unwrap();
-        db.execute(r#"insert into t values (1, "a@x.com")"#)
+        db.execute_legacy(r#"insert into t values (1, "a@x.com")"#)
             .unwrap();
     }
     std::fs::write(
@@ -290,7 +303,7 @@ fn unique_index_self_heal_when_snapshot_references_unknown_row_id() {
     {
         let mut db = Database::open_legacy(path.clone());
         assert_eq!(
-            db.execute(r#"select * from t where email = "a@x.com""#)
+            db.execute_legacy(r#"select * from t where email = "a@x.com""#)
                 .unwrap(),
             "id\temail\n1\ta@x.com"
         );
@@ -302,15 +315,15 @@ fn unique_index_does_not_block_multiple_null_values() {
     let root = temp_dir("unique_null_index");
     {
         let mut db = Database::open_legacy(root.clone());
-        db.execute("create table t (id int, email text unique)")
+        db.execute_legacy("create table t (id int, email text unique)")
             .unwrap();
-        db.execute("insert into t values (1, null)").unwrap();
-        db.execute("insert into t values (2, null)").unwrap();
+        db.execute_legacy("insert into t values (1, null)").unwrap();
+        db.execute_legacy("insert into t values (2, null)").unwrap();
     }
     {
         let mut db = Database::open_legacy(root.clone());
         assert_eq!(
-            db.execute("select * from t").unwrap(),
+            db.execute_legacy("select * from t").unwrap(),
             "id\temail\n1\tnull\n2\tnull"
         );
     }
@@ -321,16 +334,18 @@ fn secondary_index_persists_across_reopen() {
     let path = temp_dir("secondary_index_persist");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, city text)")
+        db.execute_legacy("create table users (id int, city text)")
             .unwrap();
-        db.execute("create index on users (city)").unwrap();
-        db.execute(r#"insert into users values (1, "ny")"#).unwrap();
-        db.execute(r#"insert into users values (2, "la")"#).unwrap();
+        db.execute_legacy("create index on users (city)").unwrap();
+        db.execute_legacy(r#"insert into users values (1, "ny")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into users values (2, "la")"#)
+            .unwrap();
     }
     {
         let mut db = Database::open_legacy(path.clone());
         let out = db
-            .execute(r#"select * from users where city = "ny""#)
+            .execute_legacy(r#"select * from users where city = "ny""#)
             .unwrap();
         assert_eq!(out, "id\tcity\n1\tny");
     }
@@ -341,19 +356,22 @@ fn reopen_select_index_lookup_multiple_values() {
     let path = temp_dir("reopen_select");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, city text)")
+        db.execute_legacy("create table users (id int, city text)")
             .unwrap();
-        db.execute("create index on users (city)").unwrap();
-        db.execute(r#"insert into users values (1, "ny")"#).unwrap();
-        db.execute(r#"insert into users values (2, "la")"#).unwrap();
-        db.execute(r#"insert into users values (3, "ny")"#).unwrap();
+        db.execute_legacy("create index on users (city)").unwrap();
+        db.execute_legacy(r#"insert into users values (1, "ny")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into users values (2, "la")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into users values (3, "ny")"#)
+            .unwrap();
     }
     {
         let mut db = Database::open_legacy(path.clone());
         let cases = [("ny", 2usize), ("la", 1usize), ("sf", 0usize)];
         for (city, expected_rows) in cases {
             let out = db
-                .execute(&format!(
+                .execute_legacy(&format!(
                     r#"select * from users where city = "{}" order by id asc"#,
                     city
                 ))
@@ -373,11 +391,13 @@ fn secondary_index_snapshot_with_duplicate_key_self_heals() {
     let path = temp_dir("secondary_dup_key_heal");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, city text)")
+        db.execute_legacy("create table users (id int, city text)")
             .unwrap();
-        db.execute("create index on users (city)").unwrap();
-        db.execute(r#"insert into users values (1, "ny")"#).unwrap();
-        db.execute(r#"insert into users values (2, "la")"#).unwrap();
+        db.execute_legacy("create index on users (city)").unwrap();
+        db.execute_legacy(r#"insert into users values (1, "ny")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into users values (2, "la")"#)
+            .unwrap();
     }
 
     std::fs::write(
@@ -398,7 +418,7 @@ fn secondary_index_snapshot_with_duplicate_key_self_heals() {
     {
         let mut db = Database::open_legacy(path.clone());
         let out = db
-            .execute(r#"select * from users where city = "la" order by id asc"#)
+            .execute_legacy(r#"select * from users where city = "la" order by id asc"#)
             .unwrap();
         assert_eq!(out, "id\tcity\n2\tla");
     }
@@ -409,10 +429,11 @@ fn secondary_index_snapshot_with_empty_row_ids_self_heals() {
     let path = temp_dir("secondary_empty_rowids_heal");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, city text)")
+        db.execute_legacy("create table users (id int, city text)")
             .unwrap();
-        db.execute("create index on users (city)").unwrap();
-        db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+        db.execute_legacy("create index on users (city)").unwrap();
+        db.execute_legacy(r#"insert into users values (1, "ny")"#)
+            .unwrap();
     }
 
     std::fs::write(
@@ -432,7 +453,7 @@ fn secondary_index_snapshot_with_empty_row_ids_self_heals() {
     {
         let mut db = Database::open_legacy(path.clone());
         let out = db
-            .execute(r#"select * from users where city = "ny""#)
+            .execute_legacy(r#"select * from users where city = "ny""#)
             .unwrap();
         assert_eq!(out, "id\tcity\n1\tny");
     }
@@ -443,10 +464,11 @@ fn secondary_index_snapshot_with_unknown_row_id_self_heals() {
     let path = temp_dir("secondary_unknown_rowid_heal");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, city text)")
+        db.execute_legacy("create table users (id int, city text)")
             .unwrap();
-        db.execute("create index on users (city)").unwrap();
-        db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+        db.execute_legacy("create index on users (city)").unwrap();
+        db.execute_legacy(r#"insert into users values (1, "ny")"#)
+            .unwrap();
     }
 
     std::fs::write(
@@ -466,7 +488,7 @@ fn secondary_index_snapshot_with_unknown_row_id_self_heals() {
     {
         let mut db = Database::open_legacy(path.clone());
         let out = db
-            .execute(r#"select * from users where city = "ny""#)
+            .execute_legacy(r#"select * from users where city = "ny""#)
             .unwrap();
         assert_eq!(out, "id\tcity\n1\tny");
     }
@@ -477,9 +499,9 @@ fn unique_index_snapshot_col_idxs_mismatch_self_heals() {
     let path = temp_dir("unique_colidx_mismatch_heal");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table t (id int, email text unique)")
+        db.execute_legacy("create table t (id int, email text unique)")
             .unwrap();
-        db.execute(r#"insert into t values (1, "a@x.com")"#)
+        db.execute_legacy(r#"insert into t values (1, "a@x.com")"#)
             .unwrap();
     }
 
@@ -498,7 +520,7 @@ fn unique_index_snapshot_col_idxs_mismatch_self_heals() {
     {
         let mut db = Database::open_legacy(path.clone());
         let out = db
-            .execute(r#"select * from t where email = "a@x.com""#)
+            .execute_legacy(r#"select * from t where email = "a@x.com""#)
             .unwrap();
         assert_eq!(out, "id\temail\n1\ta@x.com");
     }
@@ -509,9 +531,10 @@ fn pk_index_snapshot_col_idxs_mismatch_self_heals() {
     let path = temp_dir("pk_colidx_mismatch_heal");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table t (id int primary key, name text)")
+        db.execute_legacy("create table t (id int primary key, name text)")
             .unwrap();
-        db.execute(r#"insert into t values (1, "a")"#).unwrap();
+        db.execute_legacy(r#"insert into t values (1, "a")"#)
+            .unwrap();
     }
 
     std::fs::write(
@@ -526,7 +549,7 @@ fn pk_index_snapshot_col_idxs_mismatch_self_heals() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        let out = db.execute("select * from t where id = 1").unwrap();
+        let out = db.execute_legacy("select * from t where id = 1").unwrap();
         assert_eq!(out, "id\tname\n1\ta");
     }
 }

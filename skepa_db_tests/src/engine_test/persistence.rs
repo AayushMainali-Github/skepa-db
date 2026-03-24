@@ -8,23 +8,25 @@ fn test_constraint_persistence_after_reopen() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table t (id int primary key, email text unique, name text not null)")
-            .unwrap();
-        db.execute(r#"insert into t values (1, "a@x.com", "ram")"#)
+        db.execute_legacy(
+            "create table t (id int primary key, email text unique, name text not null)",
+        )
+        .unwrap();
+        db.execute_legacy(r#"insert into t values (1, "a@x.com", "ram")"#)
             .unwrap();
     }
     {
         let mut db = Database::open_legacy(path.clone());
         let e1 = db
-            .execute(r#"insert into t values (1, "b@x.com", "bob")"#)
+            .execute_legacy(r#"insert into t values (1, "b@x.com", "bob")"#)
             .unwrap_err();
         assert!(e1.to_lowercase().contains("primary key"));
         let e2 = db
-            .execute(r#"insert into t values (2, "a@x.com", "bob")"#)
+            .execute_legacy(r#"insert into t values (2, "a@x.com", "bob")"#)
             .unwrap_err();
         assert!(e2.to_lowercase().contains("unique"));
         let e3 = db
-            .execute(r#"insert into t values (3, "c@x.com", null)"#)
+            .execute_legacy(r#"insert into t values (3, "c@x.com", null)"#)
             .unwrap_err();
         assert!(e3.to_lowercase().contains("not null"));
     }
@@ -39,15 +41,15 @@ fn test_persistence_reopen_insert() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "ram")"#)
+        db.execute_legacy(r#"insert into users values (1, "ram")"#)
             .unwrap();
     }
 
     {
         let mut db = Database::open_legacy(path.clone());
-        let out = db.execute("select * from users").unwrap();
+        let out = db.execute_legacy("select * from users").unwrap();
         assert_eq!(out, "id\tname\n1\tram");
     }
 
@@ -62,21 +64,21 @@ fn test_persistence_reopen_update_delete() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text, age int)")
+        db.execute_legacy("create table users (id int, name text, age int)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "ram", 20)"#)
+        db.execute_legacy(r#"insert into users values (1, "ram", 20)"#)
             .unwrap();
-        db.execute(r#"insert into users values (2, "alice", 30)"#)
+        db.execute_legacy(r#"insert into users values (2, "alice", 30)"#)
             .unwrap();
-        db.execute(r#"update users set age = 99 where id = 1"#)
+        db.execute_legacy(r#"update users set age = 99 where id = 1"#)
             .unwrap();
-        db.execute(r#"delete from users where name = "alice""#)
+        db.execute_legacy(r#"delete from users where name = "alice""#)
             .unwrap();
     }
 
     {
         let mut db = Database::open_legacy(path.clone());
-        let out = db.execute("select * from users").unwrap();
+        let out = db.execute_legacy("select * from users").unwrap();
         assert_eq!(out, "id\tname\tage\n1\tram\t99");
     }
 
@@ -94,14 +96,16 @@ fn test_composite_pk_persists_and_rejects_after_reopen() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table t (a int, b int, primary key(a,b))")
+        db.execute_legacy("create table t (a int, b int, primary key(a,b))")
             .unwrap();
-        db.execute("insert into t values (1, 1)").unwrap();
+        db.execute_legacy("insert into t values (1, 1)").unwrap();
     }
 
     {
         let mut db = Database::open_legacy(path.clone());
-        let err = db.execute("insert into t values (1, 1)").unwrap_err();
+        let err = db
+            .execute_legacy("insert into t values (1, 1)")
+            .unwrap_err();
         assert!(err.to_lowercase().contains("primary key"));
     }
 

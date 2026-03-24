@@ -5,10 +5,12 @@ fn row_ids_are_persisted_with_row_prefix() {
     let path = temp_dir("row_id_prefix_persist");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "a")"#).unwrap();
-        db.execute(r#"insert into users values (2, "b")"#).unwrap();
+        db.execute_legacy(r#"insert into users values (1, "a")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into users values (2, "b")"#)
+            .unwrap();
     }
     let rows = std::fs::read_to_string(path.join("tables").join("users.rows")).unwrap();
     assert!(
@@ -22,12 +24,15 @@ fn row_ids_remain_stable_for_survivors_after_delete() {
     let path = temp_dir("row_id_stable_after_delete");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int primary key, name text)")
+        db.execute_legacy("create table users (id int primary key, name text)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "a")"#).unwrap();
-        db.execute(r#"insert into users values (2, "b")"#).unwrap();
-        db.execute(r#"insert into users values (3, "c")"#).unwrap();
-        db.execute("delete from users where id = 2").unwrap();
+        db.execute_legacy(r#"insert into users values (1, "a")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into users values (2, "b")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into users values (3, "c")"#)
+            .unwrap();
+        db.execute_legacy("delete from users where id = 2").unwrap();
     }
     let rows = std::fs::read_to_string(path.join("tables").join("users.rows")).unwrap();
     let ids = rows
@@ -45,14 +50,17 @@ fn row_ids_survive_reopen_and_append_monotonic() {
     let path = temp_dir("row_id_reopen_monotonic");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "a")"#).unwrap();
-        db.execute(r#"insert into users values (2, "b")"#).unwrap();
+        db.execute_legacy(r#"insert into users values (1, "a")"#)
+            .unwrap();
+        db.execute_legacy(r#"insert into users values (2, "b")"#)
+            .unwrap();
     }
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute(r#"insert into users values (3, "c")"#).unwrap();
+        db.execute_legacy(r#"insert into users values (3, "c")"#)
+            .unwrap();
     }
     let rows = std::fs::read_to_string(path.join("tables").join("users.rows")).unwrap();
     let ids = rows
@@ -75,7 +83,7 @@ fn row_id_format_backward_compat_without_prefix() {
     )
     .unwrap();
     let mut db = Database::open_legacy(root.clone());
-    db.execute("create table users2 (id int, name text)")
+    db.execute_legacy("create table users2 (id int, name text)")
         .unwrap();
     // Existing table bootstrap path still works and rewrites with row-id prefixes on persist.
     let mut storage = DiskStorage::new(root.clone()).unwrap();

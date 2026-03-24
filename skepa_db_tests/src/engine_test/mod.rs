@@ -13,13 +13,13 @@ fn test_db() -> Database {
 }
 
 fn seed_users_3(db: &mut Database) {
-    db.execute("create table users (id int, name text, age int)")
+    db.execute_legacy("create table users (id int, name text, age int)")
         .unwrap();
-    db.execute(r#"insert into users values (1, "a", 30)"#)
+    db.execute_legacy(r#"insert into users values (1, "a", 30)"#)
         .unwrap();
-    db.execute(r#"insert into users values (2, "b", 20)"#)
+    db.execute_legacy(r#"insert into users values (2, "b", 20)"#)
         .unwrap();
-    db.execute(r#"insert into users values (3, "c", 10)"#)
+    db.execute_legacy(r#"insert into users values (3, "c", 10)"#)
         .unwrap();
 }
 

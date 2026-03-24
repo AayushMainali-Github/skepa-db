@@ -5,9 +5,9 @@ fn wal_is_truncated_after_write() {
     let path = temp_dir("wal_truncate");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
-        db.execute(r#"insert into users values (1, "ram")"#)
+        db.execute_legacy(r#"insert into users values (1, "ram")"#)
             .unwrap();
     }
     let wal = std::fs::read_to_string(path.join("wal.log")).unwrap();
@@ -19,7 +19,7 @@ fn recovery_ignores_uncommitted_wal_transaction() {
     let path = temp_dir("wal_uncommitted_ignored");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
     }
 
@@ -32,7 +32,7 @@ fn recovery_ignores_uncommitted_wal_transaction() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        let out = db.execute("select * from users").unwrap();
+        let out = db.execute_legacy("select * from users").unwrap();
         assert_eq!(out, "id\tname");
     }
 }
@@ -42,7 +42,7 @@ fn recovery_replays_committed_wal_transaction() {
     let path = temp_dir("wal_committed_replayed");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
     }
 
@@ -55,7 +55,7 @@ fn recovery_replays_committed_wal_transaction() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        let out = db.execute("select * from users").unwrap();
+        let out = db.execute_legacy("select * from users").unwrap();
         assert_eq!(out, "id\tname\n1\tram");
     }
 }
@@ -65,7 +65,7 @@ fn recovery_replays_only_committed_when_wal_has_mixed_transactions() {
     let path = temp_dir("wal_mixed_recovery");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
     }
 
@@ -87,7 +87,7 @@ fn recovery_replays_only_committed_when_wal_has_mixed_transactions() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        let out = db.execute("select * from users").unwrap();
+        let out = db.execute_legacy("select * from users").unwrap();
         assert_eq!(out, "id\tname\n1\ta\n3\tc");
     }
 }
@@ -97,7 +97,7 @@ fn recovery_ignores_explicitly_rolled_back_transaction() {
     let path = temp_dir("wal_rolled_back_ignored");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
     }
 
@@ -109,7 +109,7 @@ fn recovery_ignores_explicitly_rolled_back_transaction() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        let out = db.execute("select * from users").unwrap();
+        let out = db.execute_legacy("select * from users").unwrap();
         assert_eq!(out, "id\tname");
     }
 }
@@ -119,7 +119,7 @@ fn recovery_commit_without_ops_is_noop() {
     let path = temp_dir("wal_commit_noop");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
     }
 
@@ -127,7 +127,7 @@ fn recovery_commit_without_ops_is_noop() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        let out = db.execute("select * from users").unwrap();
+        let out = db.execute_legacy("select * from users").unwrap();
         assert_eq!(out, "id\tname");
     }
 }
@@ -137,7 +137,7 @@ fn recovery_ignores_commit_for_unknown_transaction() {
     let path = temp_dir("wal_unknown_commit");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
     }
 
@@ -145,7 +145,7 @@ fn recovery_ignores_commit_for_unknown_transaction() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        let out = db.execute("select * from users").unwrap();
+        let out = db.execute_legacy("select * from users").unwrap();
         assert_eq!(out, "id\tname");
     }
 }
@@ -155,12 +155,14 @@ fn recovery_replays_committed_delete_with_on_delete_cascade() {
     let path = temp_dir("wal_fk_delete_cascade_replay");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table p (id int primary key)").unwrap();
-        db.execute("create table c (id int, pid int)").unwrap();
-        db.execute("alter table c add foreign key(pid) references p(id) on delete cascade")
+        db.execute_legacy("create table p (id int primary key)")
             .unwrap();
-        db.execute("insert into p values (1)").unwrap();
-        db.execute("insert into c values (10, 1)").unwrap();
+        db.execute_legacy("create table c (id int, pid int)")
+            .unwrap();
+        db.execute_legacy("alter table c add foreign key(pid) references p(id) on delete cascade")
+            .unwrap();
+        db.execute_legacy("insert into p values (1)").unwrap();
+        db.execute_legacy("insert into c values (10, 1)").unwrap();
     }
 
     std::fs::write(
@@ -171,8 +173,8 @@ fn recovery_replays_committed_delete_with_on_delete_cascade() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        assert_eq!(db.execute("select * from p").unwrap(), "id");
-        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid");
+        assert_eq!(db.execute_legacy("select * from p").unwrap(), "id");
+        assert_eq!(db.execute_legacy("select * from c").unwrap(), "id\tpid");
     }
 }
 
@@ -181,12 +183,14 @@ fn recovery_ignores_uncommitted_delete_with_on_delete_cascade() {
     let path = temp_dir("wal_fk_delete_cascade_uncommitted");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table p (id int primary key)").unwrap();
-        db.execute("create table c (id int, pid int)").unwrap();
-        db.execute("alter table c add foreign key(pid) references p(id) on delete cascade")
+        db.execute_legacy("create table p (id int primary key)")
             .unwrap();
-        db.execute("insert into p values (1)").unwrap();
-        db.execute("insert into c values (10, 1)").unwrap();
+        db.execute_legacy("create table c (id int, pid int)")
+            .unwrap();
+        db.execute_legacy("alter table c add foreign key(pid) references p(id) on delete cascade")
+            .unwrap();
+        db.execute_legacy("insert into p values (1)").unwrap();
+        db.execute_legacy("insert into c values (10, 1)").unwrap();
     }
 
     std::fs::write(
@@ -197,8 +201,11 @@ fn recovery_ignores_uncommitted_delete_with_on_delete_cascade() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
-        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t1");
+        assert_eq!(db.execute_legacy("select * from p").unwrap(), "id\n1");
+        assert_eq!(
+            db.execute_legacy("select * from c").unwrap(),
+            "id\tpid\n10\t1"
+        );
     }
 }
 
@@ -207,12 +214,14 @@ fn recovery_replays_committed_update_with_on_update_set_null() {
     let path = temp_dir("wal_fk_update_set_null_replay");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table p (id int primary key)").unwrap();
-        db.execute("create table c (id int, pid int)").unwrap();
-        db.execute("alter table c add foreign key(pid) references p(id) on update set null")
+        db.execute_legacy("create table p (id int primary key)")
             .unwrap();
-        db.execute("insert into p values (1)").unwrap();
-        db.execute("insert into c values (10, 1)").unwrap();
+        db.execute_legacy("create table c (id int, pid int)")
+            .unwrap();
+        db.execute_legacy("alter table c add foreign key(pid) references p(id) on update set null")
+            .unwrap();
+        db.execute_legacy("insert into p values (1)").unwrap();
+        db.execute_legacy("insert into c values (10, 1)").unwrap();
     }
 
     std::fs::write(
@@ -223,8 +232,11 @@ fn recovery_replays_committed_update_with_on_update_set_null() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        assert_eq!(db.execute("select * from p").unwrap(), "id\n2");
-        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\tnull");
+        assert_eq!(db.execute_legacy("select * from p").unwrap(), "id\n2");
+        assert_eq!(
+            db.execute_legacy("select * from c").unwrap(),
+            "id\tpid\n10\tnull"
+        );
     }
 }
 
@@ -233,12 +245,16 @@ fn recovery_replays_committed_update_with_on_update_no_action_when_fixed_in_tx()
     let path = temp_dir("wal_fk_update_no_action_fixed");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table p (id int primary key)").unwrap();
-        db.execute("create table c (id int, pid int)").unwrap();
-        db.execute("alter table c add foreign key(pid) references p(id) on update no action")
+        db.execute_legacy("create table p (id int primary key)")
             .unwrap();
-        db.execute("insert into p values (1)").unwrap();
-        db.execute("insert into c values (10, 1)").unwrap();
+        db.execute_legacy("create table c (id int, pid int)")
+            .unwrap();
+        db.execute_legacy(
+            "alter table c add foreign key(pid) references p(id) on update no action",
+        )
+        .unwrap();
+        db.execute_legacy("insert into p values (1)").unwrap();
+        db.execute_legacy("insert into c values (10, 1)").unwrap();
     }
 
     std::fs::write(
@@ -254,8 +270,11 @@ fn recovery_replays_committed_update_with_on_update_no_action_when_fixed_in_tx()
 
     {
         let mut db = Database::open_legacy(path.clone());
-        assert_eq!(db.execute("select * from p").unwrap(), "id\n2");
-        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t2");
+        assert_eq!(db.execute_legacy("select * from p").unwrap(), "id\n2");
+        assert_eq!(
+            db.execute_legacy("select * from c").unwrap(),
+            "id\tpid\n10\t2"
+        );
     }
 }
 
@@ -264,12 +283,16 @@ fn recovery_skips_committed_update_with_on_update_no_action_when_still_violated(
     let path = temp_dir("wal_fk_update_no_action_violated");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table p (id int primary key)").unwrap();
-        db.execute("create table c (id int, pid int)").unwrap();
-        db.execute("alter table c add foreign key(pid) references p(id) on update no action")
+        db.execute_legacy("create table p (id int primary key)")
             .unwrap();
-        db.execute("insert into p values (1)").unwrap();
-        db.execute("insert into c values (10, 1)").unwrap();
+        db.execute_legacy("create table c (id int, pid int)")
+            .unwrap();
+        db.execute_legacy(
+            "alter table c add foreign key(pid) references p(id) on update no action",
+        )
+        .unwrap();
+        db.execute_legacy("insert into p values (1)").unwrap();
+        db.execute_legacy("insert into c values (10, 1)").unwrap();
     }
 
     std::fs::write(
@@ -281,8 +304,11 @@ fn recovery_skips_committed_update_with_on_update_no_action_when_still_violated(
     {
         let mut db = Database::open_legacy(path.clone());
         // Invalid NO ACTION commit must not be applied during recovery.
-        assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
-        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t1");
+        assert_eq!(db.execute_legacy("select * from p").unwrap(), "id\n1");
+        assert_eq!(
+            db.execute_legacy("select * from c").unwrap(),
+            "id\tpid\n10\t1"
+        );
     }
 }
 
@@ -291,12 +317,16 @@ fn recovery_replays_committed_delete_with_on_delete_no_action_when_fixed_in_tx()
     let path = temp_dir("wal_fk_delete_no_action_fixed");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table p (id int primary key)").unwrap();
-        db.execute("create table c (id int, pid int)").unwrap();
-        db.execute("alter table c add foreign key(pid) references p(id) on delete no action")
+        db.execute_legacy("create table p (id int primary key)")
             .unwrap();
-        db.execute("insert into p values (1)").unwrap();
-        db.execute("insert into c values (10, 1)").unwrap();
+        db.execute_legacy("create table c (id int, pid int)")
+            .unwrap();
+        db.execute_legacy(
+            "alter table c add foreign key(pid) references p(id) on delete no action",
+        )
+        .unwrap();
+        db.execute_legacy("insert into p values (1)").unwrap();
+        db.execute_legacy("insert into c values (10, 1)").unwrap();
     }
 
     std::fs::write(
@@ -312,8 +342,8 @@ fn recovery_replays_committed_delete_with_on_delete_no_action_when_fixed_in_tx()
 
     {
         let mut db = Database::open_legacy(path.clone());
-        assert_eq!(db.execute("select * from p").unwrap(), "id");
-        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid");
+        assert_eq!(db.execute_legacy("select * from p").unwrap(), "id");
+        assert_eq!(db.execute_legacy("select * from c").unwrap(), "id\tpid");
     }
 }
 
@@ -322,12 +352,16 @@ fn recovery_skips_committed_delete_with_on_delete_no_action_when_still_violated(
     let path = temp_dir("wal_fk_delete_no_action_violated");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table p (id int primary key)").unwrap();
-        db.execute("create table c (id int, pid int)").unwrap();
-        db.execute("alter table c add foreign key(pid) references p(id) on delete no action")
+        db.execute_legacy("create table p (id int primary key)")
             .unwrap();
-        db.execute("insert into p values (1)").unwrap();
-        db.execute("insert into c values (10, 1)").unwrap();
+        db.execute_legacy("create table c (id int, pid int)")
+            .unwrap();
+        db.execute_legacy(
+            "alter table c add foreign key(pid) references p(id) on delete no action",
+        )
+        .unwrap();
+        db.execute_legacy("insert into p values (1)").unwrap();
+        db.execute_legacy("insert into c values (10, 1)").unwrap();
     }
 
     std::fs::write(
@@ -339,8 +373,11 @@ fn recovery_skips_committed_delete_with_on_delete_no_action_when_still_violated(
     {
         let mut db = Database::open_legacy(path.clone());
         // Invalid NO ACTION commit must not be applied during recovery.
-        assert_eq!(db.execute("select * from p").unwrap(), "id\n1");
-        assert_eq!(db.execute("select * from c").unwrap(), "id\tpid\n10\t1");
+        assert_eq!(db.execute_legacy("select * from p").unwrap(), "id\n1");
+        assert_eq!(
+            db.execute_legacy("select * from c").unwrap(),
+            "id\tpid\n10\t1"
+        );
     }
 }
 
@@ -349,14 +386,18 @@ fn recovery_mixed_committed_valid_and_invalid_txs_keeps_only_valid_effects() {
     let path = temp_dir("wal_mixed_valid_invalid_txs");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table p (id int primary key)").unwrap();
-        db.execute("create table c (id int, pid int)").unwrap();
-        db.execute("alter table c add foreign key(pid) references p(id) on update no action")
+        db.execute_legacy("create table p (id int primary key)")
             .unwrap();
-        db.execute("insert into p values (1)").unwrap();
-        db.execute("insert into p values (2)").unwrap();
-        db.execute("insert into c values (10, 1)").unwrap();
-        db.execute("insert into c values (20, 2)").unwrap();
+        db.execute_legacy("create table c (id int, pid int)")
+            .unwrap();
+        db.execute_legacy(
+            "alter table c add foreign key(pid) references p(id) on update no action",
+        )
+        .unwrap();
+        db.execute_legacy("insert into p values (1)").unwrap();
+        db.execute_legacy("insert into p values (2)").unwrap();
+        db.execute_legacy("insert into c values (10, 1)").unwrap();
+        db.execute_legacy("insert into c values (20, 2)").unwrap();
     }
 
     std::fs::write(
@@ -382,11 +423,13 @@ fn recovery_mixed_committed_valid_and_invalid_txs_keeps_only_valid_effects() {
     {
         let mut db = Database::open_legacy(path.clone());
         assert_eq!(
-            db.execute("select * from p order by id asc").unwrap(),
+            db.execute_legacy("select * from p order by id asc")
+                .unwrap(),
             "id\n1\n3"
         );
         assert_eq!(
-            db.execute("select * from c order by id asc").unwrap(),
+            db.execute_legacy("select * from c order by id asc")
+                .unwrap(),
             "id\tpid\n10\t1\n20\t3"
         );
     }

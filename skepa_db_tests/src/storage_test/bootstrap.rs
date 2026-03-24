@@ -136,11 +136,11 @@ fn empty_wal_file_is_handled() {
     let path = temp_dir("empty_wal");
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute("create table users (id int, name text)")
+        db.execute_legacy("create table users (id int, name text)")
             .unwrap();
     }
     std::fs::write(path.join("wal.log"), "").unwrap();
     let mut reopened = Database::open_legacy(path);
-    let out = reopened.execute("select * from users").unwrap();
+    let out = reopened.execute_legacy("select * from users").unwrap();
     assert_eq!(out, "id\tname");
 }
