@@ -3,52 +3,49 @@ use super::*;
 #[test]
 fn test_transaction_commit_persists_changes() {
     let mut db = test_db();
-    db.execute_legacy("create table users (id int, name text)")
+    db.execute("create table users (id int, name text)")
         .unwrap();
-    assert_eq!(db.execute_legacy("begin").unwrap(), "transaction started");
-    db.execute_legacy(r#"insert into users values (1, "ram")"#)
+    assert_transaction_result(db.execute("begin").unwrap(), "transaction started");
+    db.execute(r#"insert into users values (1, "ram")"#)
         .unwrap();
-    assert_eq!(
-        db.execute_legacy("commit").unwrap(),
-        "transaction committed"
-    );
-    assert_eq!(
-        db.execute_legacy("select * from users").unwrap(),
-        "id\tname\n1\tram"
+    assert_transaction_result(db.execute("commit").unwrap(), "transaction committed");
+    assert_select_result(
+        db.execute("select * from users").unwrap(),
+        &["id", "name"],
+        vec![vec![Value::Int(1), Value::Text("ram".to_string())]],
     );
 }
 
 #[test]
 fn test_transaction_rollback_discards_changes() {
     let mut db = test_db();
-    db.execute_legacy("create table users (id int, name text)")
+    db.execute("create table users (id int, name text)")
         .unwrap();
-    db.execute_legacy("begin").unwrap();
-    db.execute_legacy(r#"insert into users values (1, "ram")"#)
+    assert_transaction_result(db.execute("begin").unwrap(), "transaction started");
+    db.execute(r#"insert into users values (1, "ram")"#)
         .unwrap();
-    assert_eq!(
-        db.execute_legacy("rollback").unwrap(),
-        "transaction rolled back"
-    );
-    assert_eq!(
-        db.execute_legacy("select * from users").unwrap(),
-        "id\tname"
+    assert_transaction_result(db.execute("rollback").unwrap(), "transaction rolled back");
+    assert_select_result(
+        db.execute("select * from users").unwrap(),
+        &["id", "name"],
+        vec![],
     );
 }
 
 #[test]
 fn test_transaction_is_visible_inside_tx_before_commit() {
     let mut db = test_db();
-    db.execute_legacy("create table users (id int, name text)")
+    db.execute("create table users (id int, name text)")
         .unwrap();
-    db.execute_legacy("begin").unwrap();
-    db.execute_legacy(r#"insert into users values (1, "ram")"#)
+    db.execute("begin").unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#)
         .unwrap();
-    assert_eq!(
-        db.execute_legacy("select * from users").unwrap(),
-        "id\tname\n1\tram"
+    assert_select_result(
+        db.execute("select * from users").unwrap(),
+        &["id", "name"],
+        vec![vec![Value::Int(1), Value::Text("ram".to_string())]],
     );
-    db.execute_legacy("rollback").unwrap();
+    assert_transaction_result(db.execute("rollback").unwrap(), "transaction rolled back");
 }
 
 #[test]
@@ -92,19 +89,20 @@ fn test_transaction_commit_persists_after_reopen() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute_legacy("create table users (id int, name text)")
+        db.execute("create table users (id int, name text)")
             .unwrap();
-        db.execute_legacy("begin").unwrap();
-        db.execute_legacy(r#"insert into users values (1, "ram")"#)
+        db.execute("begin").unwrap();
+        db.execute(r#"insert into users values (1, "ram")"#)
             .unwrap();
-        db.execute_legacy("commit").unwrap();
+        db.execute("commit").unwrap();
     }
 
     {
         let mut db = Database::open_legacy(path.clone());
-        assert_eq!(
-            db.execute_legacy("select * from users").unwrap(),
-            "id\tname\n1\tram"
+        assert_select_result(
+            db.execute("select * from users").unwrap(),
+            &["id", "name"],
+            vec![vec![Value::Int(1), Value::Text("ram".to_string())]],
         );
     }
 
@@ -119,19 +117,20 @@ fn test_transaction_rollback_not_persisted_after_reopen() {
 
     {
         let mut db = Database::open_legacy(path.clone());
-        db.execute_legacy("create table users (id int, name text)")
+        db.execute("create table users (id int, name text)")
             .unwrap();
-        db.execute_legacy("begin").unwrap();
-        db.execute_legacy(r#"insert into users values (1, "ram")"#)
+        db.execute("begin").unwrap();
+        db.execute(r#"insert into users values (1, "ram")"#)
             .unwrap();
-        db.execute_legacy("rollback").unwrap();
+        db.execute("rollback").unwrap();
     }
 
     {
         let mut db = Database::open_legacy(path.clone());
-        assert_eq!(
-            db.execute_legacy("select * from users").unwrap(),
-            "id\tname"
+        assert_select_result(
+            db.execute("select * from users").unwrap(),
+            &["id", "name"],
+            vec![],
         );
     }
 

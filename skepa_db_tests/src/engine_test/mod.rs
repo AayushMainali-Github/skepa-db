@@ -81,6 +81,17 @@ fn assert_schema_change_result(result: QueryResult, expected_message: &str) {
     }
 }
 
+fn assert_transaction_result(result: QueryResult, expected_message: &str) {
+    match result {
+        QueryResult::Transaction { message, stats } => {
+            assert_eq!(message, expected_message);
+            assert_eq!(stats.rows_returned, None);
+            assert_eq!(stats.rows_affected, None);
+        }
+        other => panic!("expected transaction result, got {other:?}"),
+    }
+}
+
 mod aggregates;
 mod api_json;
 mod basic;
