@@ -256,7 +256,7 @@ mod tests {
     use super::*;
     use axum::body::{Body, to_bytes};
     use axum::http::{Method, Request};
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tower::util::ServiceExt;
 
@@ -319,7 +319,14 @@ mod tests {
                     .uri("/batch")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        r#"{"statements":["create table users (id int, name text)","insert into users values (1, \"ram\")","select * from users"]}"#,
+                        json!({
+                            "statements": [
+                                "create table users (id int, name text)",
+                                "insert into users values (1, \"ram\")",
+                                "select * from users"
+                            ]
+                        })
+                        .to_string(),
                     ))
                     .expect("request should build"),
             )

@@ -112,8 +112,11 @@ fn print_help() {
     println!("  exit|quit     -> quit");
 }
 
-fn parse_cli_config() -> Result<CliConfig> {
-    let mut args = env::args().skip(1).peekable();
+fn parse_cli_args<I>(args: I) -> Result<CliConfig>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter().peekable();
     let mut db_path = PathBuf::from("./mydb");
     let mut remote_url = None;
     let mut mode = None;
@@ -138,14 +141,19 @@ fn parse_cli_config() -> Result<CliConfig> {
                 if mode.is_some() {
                     bail!("command already specified");
                 }
-                let sql_parts = args.collect::<Vec<_>>();
+                let mut sql_parts = Vec::new();
+                while let Some(next) = args.peek() {
+                    if next == "--db-path" || next == "--remote" {
+                        break;
+                    }
+                    sql_parts.push(args.next().expect("peeked argument should exist"));
+                }
                 if sql_parts.is_empty() {
                     bail!("missing sql for execute");
                 }
                 mode = Some(CommandMode::Execute {
                     sql: sql_parts.join(" "),
                 });
-                break;
             }
             "help" | "--help" | "-h" => {
                 print_help();
@@ -171,6 +179,10 @@ fn parse_cli_config() -> Result<CliConfig> {
         db_path,
         remote_url,
     })
+}
+
+fn parse_cli_config() -> Result<CliConfig> {
+    parse_cli_args(env::args().skip(1))
 }
 
 fn execute_embedded(db: &mut Database, sql: &str) -> Result<QueryResult> {
@@ -336,5 +348,96 @@ fn run() -> Result<()> {
         (CommandMode::Execute { sql }, Some(remote_url)) => run_remote_execute(remote_url, sql),
         (CommandMode::Shell, None) => run_embedded_shell(&config),
         (CommandMode::Execute { sql }, None) => run_embedded_execute(&config, sql),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    #[test]
+    fn parse_cli_args_supports_remote_execute_mode() {
+        let config = parse_cli_args([
+            "execute".to_string(),
+            "select * from users".to_string(),
+            "--remote".to_string(),
+            "http://127.0.0.1:8080".to_string(),
+        ])
+        .expect("args should parse");
+
+        match config.mode {
+            CommandMode::Execute { sql } => assert_eq!(sql, "select * from users"),
+            CommandMode::Shell => panic!("expected execute mode"),
+        }
+        assert_eq!(config.remote_url.as_deref(), Some("http://127.0.0.1:8080"));
+    }
+
+    #[test]
+    fn parse_cli_args_defaults_to_shell_mode() {
+        let config = parse_cli_args(Vec::<String>::new()).expect("args should parse");
+        assert!(matches!(config.mode, CommandMode::Shell));
+        assert_eq!(config.db_path, PathBuf::from("./mydb"));
+        assert!(config.remote_url.is_none());
+    }
+
+    fn spawn_test_server(
+        response_body: String,
+        status_line: &str,
+    ) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let addr = listener.local_addr().expect("local addr should exist");
+        let status_line = status_line.to_string();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("connection should be accepted");
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer);
+            let response = format!(
+                "{status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should write");
+        });
+
+        (format!("http://{}", addr), handle)
+    }
+
+    #[test]
+    fn execute_remote_returns_query_result() {
+        let (base_url, handle) = spawn_test_server(
+            r#"{"ok":true,"request_id":1,"result":{"SchemaChange":{"message":"created table users","stats":{"rows_returned":null,"rows_affected":null}}}}"#.to_string(),
+            "HTTP/1.1 200 OK",
+        );
+        let client = Client::new();
+
+        let result = execute_remote(&client, &base_url, "create table users (id int)")
+            .expect("remote execution should succeed");
+
+        match result {
+            QueryResult::SchemaChange { message, .. } => assert_eq!(message, "created table users"),
+            _ => panic!("expected schema change result"),
+        }
+
+        handle.join().expect("server thread should finish");
+    }
+
+    #[test]
+    fn execute_remote_maps_http_errors() {
+        let (base_url, handle) = spawn_test_server(
+            r#"{"ok":false,"request_id":1,"error":{"message":"synthetic remote error"}}"#
+                .to_string(),
+            "HTTP/1.1 400 Bad Request",
+        );
+        let client = Client::new();
+
+        let error = execute_remote(&client, &base_url, "bad sql").expect_err("request should fail");
+        assert!(error.to_string().contains("synthetic remote error"));
+
+        handle.join().expect("server thread should finish");
     }
 }
