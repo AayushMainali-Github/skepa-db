@@ -1,4 +1,5 @@
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::path::PathBuf;
 use std::{fs, io::Write};
 
@@ -36,9 +37,8 @@ pub struct Database {
 impl Database {
     pub fn try_open(path: impl Into<PathBuf>) -> DbResult<Self> {
         let path = path.into();
-        let storage = DiskStorage::new(path.clone()).map_err(DbError::from)?;
-        let catalog_path = path.join("catalog.json");
-        let catalog = Catalog::load_from_path(&catalog_path).unwrap_or_else(|_| Catalog::new());
+        let storage = Self::initialize_storage(&path)?;
+        let catalog = Self::load_catalog(&path);
 
         let mut db = Self {
             path,
@@ -48,15 +48,8 @@ impl Database {
             next_txid: 1,
         };
 
-        for (table, _) in db.catalog.snapshot_tables() {
-            let schema = db.catalog.schema(&table).map_err(DbError::from)?;
-            db.storage
-                .bootstrap_table(&table, schema)
-                .map_err(DbError::from)?;
-        }
-
-        db.replay_wal().map_err(DbError::from)?;
-        db.checkpoint_and_truncate_wal().map_err(DbError::from)?;
+        db.bootstrap_tables()?;
+        db.recover()?;
         Ok(db)
     }
 
@@ -188,6 +181,31 @@ impl Database {
 
     pub fn path(&self) -> &PathBuf {
         &self.path
+    }
+
+    fn initialize_storage(path: &Path) -> DbResult<DiskStorage> {
+        DiskStorage::new(path.to_path_buf()).map_err(DbError::from)
+    }
+
+    fn load_catalog(path: &Path) -> Catalog {
+        let catalog_path = path.join("catalog.json");
+        Catalog::load_from_path(&catalog_path).unwrap_or_else(|_| Catalog::new())
+    }
+
+    fn bootstrap_tables(&mut self) -> DbResult<()> {
+        for (table, _) in self.catalog.snapshot_tables() {
+            let schema = self.catalog.schema(&table).map_err(DbError::from)?;
+            self.storage
+                .bootstrap_table(&table, schema)
+                .map_err(DbError::from)?;
+        }
+        Ok(())
+    }
+
+    fn recover(&mut self) -> DbResult<()> {
+        self.replay_wal().map_err(DbError::from)?;
+        self.checkpoint_and_truncate_wal().map_err(DbError::from)?;
+        Ok(())
     }
 
     fn save_catalog(&self) -> Result<(), String> {
