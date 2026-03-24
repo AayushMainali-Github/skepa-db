@@ -11,17 +11,23 @@ fn test_select_from_missing_table() {
 #[test]
 fn test_select_where_eq_int() {
     let mut db = test_db();
-    db.execute_legacy("create table users (id int, name text, age int)")
+    db.execute("create table users (id int, name text, age int)")
         .unwrap();
-    db.execute_legacy(r#"insert into users values (1, "ram", 20)"#)
+    db.execute(r#"insert into users values (1, "ram", 20)"#)
         .unwrap();
-    db.execute_legacy(r#"insert into users values (2, "alice", 30)"#)
+    db.execute(r#"insert into users values (2, "alice", 30)"#)
         .unwrap();
 
-    let result = db
-        .execute_legacy("select * from users where age = 30")
-        .unwrap();
-    assert_eq!(result, "id\tname\tage\n2\talice\t30");
+    let result = db.execute("select * from users where age = 30").unwrap();
+    assert_select_result(
+        result,
+        &["id", "name", "age"],
+        vec![vec![
+            Value::Int(2),
+            Value::Text("alice".to_string()),
+            Value::Int(30),
+        ]],
+    );
 }
 
 #[test]
@@ -186,15 +192,22 @@ fn test_select_where_like_on_int_errors() {
 #[test]
 fn test_select_specific_columns() {
     let mut db = test_db();
-    db.execute_legacy("create table users (id int, name text, age int)")
+    db.execute("create table users (id int, name text, age int)")
         .unwrap();
-    db.execute_legacy(r#"insert into users values (1, "ram", 20)"#)
+    db.execute(r#"insert into users values (1, "ram", 20)"#)
         .unwrap();
-    db.execute_legacy(r#"insert into users values (2, "alice", 30)"#)
+    db.execute(r#"insert into users values (2, "alice", 30)"#)
         .unwrap();
 
-    let result = db.execute_legacy("select id,name from users").unwrap();
-    assert_eq!(result, "id\tname\n1\tram\n2\talice");
+    let result = db.execute("select id,name from users").unwrap();
+    assert_select_result(
+        result,
+        &["id", "name"],
+        vec![
+            vec![Value::Int(1), Value::Text("ram".to_string())],
+            vec![Value::Int(2), Value::Text("alice".to_string())],
+        ],
+    );
 }
 
 #[test]
@@ -390,12 +403,12 @@ fn test_select_like_question_matches_single_char_only() {
 #[test]
 fn test_select_on_empty_table_with_where_keeps_header() {
     let mut db = test_db();
-    db.execute_legacy("create table users (id int, name text)")
+    db.execute("create table users (id int, name text)")
         .unwrap();
     let out = db
-        .execute_legacy(r#"select * from users where name like "*""#)
+        .execute(r#"select * from users where name like "*""#)
         .unwrap();
-    assert_eq!(out, "id\tname");
+    assert_select_result(out, &["id", "name"], vec![]);
 }
 
 #[test]

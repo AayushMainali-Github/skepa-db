@@ -3,15 +3,22 @@ use super::*;
 #[test]
 fn test_insert_multiple_rows() {
     let mut db = test_db();
-    db.execute_legacy("create table users (id int, name text)")
+    db.execute("create table users (id int, name text)")
         .unwrap();
-    db.execute_legacy(r#"insert into users values (1, "ram")"#)
+    db.execute(r#"insert into users values (1, "ram")"#)
         .unwrap();
-    db.execute_legacy(r#"insert into users values (2, "alice")"#)
+    db.execute(r#"insert into users values (2, "alice")"#)
         .unwrap();
 
-    let result = db.execute_legacy("select * from users").unwrap();
-    assert_eq!(result, "id\tname\n1\tram\n2\talice");
+    let result = db.execute("select * from users").unwrap();
+    assert_select_result(
+        result,
+        &["id", "name"],
+        vec![
+            vec![Value::Int(1), Value::Text("ram".to_string())],
+            vec![Value::Int(2), Value::Text("alice".to_string())],
+        ],
+    );
 }
 
 #[test]
@@ -47,20 +54,35 @@ fn test_insert_type_mismatch_int() {
 #[test]
 fn test_update_single_column_where_eq() {
     let mut db = test_db();
-    db.execute_legacy("create table users (id int, name text, age int)")
+    db.execute("create table users (id int, name text, age int)")
         .unwrap();
-    db.execute_legacy(r#"insert into users values (1, "ram", 20)"#)
+    db.execute(r#"insert into users values (1, "ram", 20)"#)
         .unwrap();
-    db.execute_legacy(r#"insert into users values (2, "alice", 30)"#)
+    db.execute(r#"insert into users values (2, "alice", 30)"#)
         .unwrap();
 
     let out = db
-        .execute_legacy(r#"update users set name = "ravi" where id = 1"#)
+        .execute(r#"update users set name = "ravi" where id = 1"#)
         .unwrap();
-    assert_eq!(out, "updated 1 row(s) in users");
+    assert_mutation_result(out, "updated 1 row(s) in users", 1);
 
-    let result = db.execute_legacy("select * from users").unwrap();
-    assert_eq!(result, "id\tname\tage\n1\travi\t20\n2\talice\t30");
+    let result = db.execute("select * from users").unwrap();
+    assert_select_result(
+        result,
+        &["id", "name", "age"],
+        vec![
+            vec![
+                Value::Int(1),
+                Value::Text("ravi".to_string()),
+                Value::Int(20),
+            ],
+            vec![
+                Value::Int(2),
+                Value::Text("alice".to_string()),
+                Value::Int(30),
+            ],
+        ],
+    );
 }
 
 #[test]
@@ -277,18 +299,22 @@ fn test_update_type_mismatch_errors() {
 #[test]
 fn test_delete_where_eq() {
     let mut db = test_db();
-    db.execute_legacy("create table users (id int, name text)")
+    db.execute("create table users (id int, name text)")
         .unwrap();
-    db.execute_legacy(r#"insert into users values (1, "ram")"#)
+    db.execute(r#"insert into users values (1, "ram")"#)
         .unwrap();
-    db.execute_legacy(r#"insert into users values (2, "alice")"#)
+    db.execute(r#"insert into users values (2, "alice")"#)
         .unwrap();
 
-    let out = db.execute_legacy("delete from users where id = 1").unwrap();
-    assert_eq!(out, "deleted 1 row(s) from users");
+    let out = db.execute("delete from users where id = 1").unwrap();
+    assert_mutation_result(out, "deleted 1 row(s) from users", 1);
 
-    let result = db.execute_legacy("select * from users").unwrap();
-    assert_eq!(result, "id\tname\n2\talice");
+    let result = db.execute("select * from users").unwrap();
+    assert_select_result(
+        result,
+        &["id", "name"],
+        vec![vec![Value::Int(2), Value::Text("alice".to_string())]],
+    );
 }
 
 #[test]
