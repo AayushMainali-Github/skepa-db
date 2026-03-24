@@ -1,8 +1,8 @@
 use crate::parser::command::ForeignKeyAction;
 use crate::types::datatype::DataType;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForeignKeyDef {
     pub columns: Vec<String>,
     pub ref_table: String,
@@ -12,7 +12,7 @@ pub struct ForeignKeyDef {
 }
 
 /// Represents a single column in a table schema
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Column {
     pub name: String,
     pub dtype: DataType,
@@ -22,7 +22,7 @@ pub struct Column {
 }
 
 /// Represents the schema of a table (list of columns)
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schema {
     pub columns: Vec<Column>,
     pub primary_key: Vec<String>,

@@ -2,7 +2,7 @@ use crate::types::datatype::DataType;
 use chrono::{NaiveDate, NaiveDateTime};
 use rust_decimal::Decimal;
 use serde::ser::SerializeSeq;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
@@ -48,6 +48,45 @@ impl Serialize for Value {
                 seq.end()
             }
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = JsonValue::deserialize(deserializer)?;
+        Ok(match value {
+            JsonValue::Null => Value::Null,
+            JsonValue::Bool(value) => Value::Bool(value),
+            JsonValue::Number(value) => {
+                if let Some(value) = value.as_i64() {
+                    Value::Int(value)
+                } else {
+                    Value::Decimal(
+                        value
+                            .to_string()
+                            .parse::<Decimal>()
+                            .map_err(serde::de::Error::custom)?,
+                    )
+                }
+            }
+            JsonValue::String(value) => Value::Text(value),
+            JsonValue::Array(values) => {
+                if values.iter().all(|value| value.as_u64().is_some()) {
+                    Value::Blob(
+                        values
+                            .into_iter()
+                            .map(|value| value.as_u64().unwrap_or_default() as u8)
+                            .collect(),
+                    )
+                } else {
+                    Value::Json(JsonValue::Array(values))
+                }
+            }
+            JsonValue::Object(values) => Value::Json(JsonValue::Object(values)),
+        })
     }
 }
 

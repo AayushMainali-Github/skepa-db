@@ -1,4 +1,6 @@
 use anyhow::{Context, Result, bail};
+use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
 use skepa_db_core::Database;
 use skepa_db_core::config::DbConfig;
 use skepa_db_core::parser::parser::parse;
@@ -19,6 +21,30 @@ struct CliConfig {
     mode: CommandMode,
     db_path: PathBuf,
     remote_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ExecuteRequest {
+    sql: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExecuteResponse {
+    ok: bool,
+    request_id: u64,
+    result: QueryResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorResponse {
+    ok: bool,
+    request_id: u64,
+    error: ErrorBody,
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorBody {
+    message: String,
 }
 
 fn render_query_result(result: &QueryResult) -> String {
@@ -151,6 +177,37 @@ fn execute_embedded(db: &mut Database, sql: &str) -> Result<QueryResult> {
     db.execute(sql).map_err(Into::into)
 }
 
+fn execute_remote(client: &Client, remote_url: &str, sql: &str) -> Result<QueryResult> {
+    let url = format!("{}/execute", remote_url.trim_end_matches('/'));
+    let response = client
+        .post(&url)
+        .json(&ExecuteRequest {
+            sql: sql.to_string(),
+        })
+        .send()
+        .with_context(|| format!("failed to send request to {url}"))?;
+
+    if response.status().is_success() {
+        let payload: ExecuteResponse = response
+            .json()
+            .with_context(|| format!("failed to parse success response from {url}"))?;
+        let _request_id = payload.request_id;
+        let _ok = payload.ok;
+        Ok(payload.result)
+    } else {
+        let status = response.status();
+        let payload: ErrorResponse = response
+            .json()
+            .with_context(|| format!("failed to parse error response from {url}"))?;
+        let _request_id = payload.request_id;
+        let _ok = payload.ok;
+        bail!(
+            "remote request failed ({status}): {}",
+            payload.error.message
+        )
+    }
+}
+
 fn run_embedded_shell(config: &CliConfig) -> Result<()> {
     let mut db = Database::open(DbConfig::new(config.db_path.clone()))
         .with_context(|| format!("failed to open database at {}", config.db_path.display()))?;
@@ -201,10 +258,65 @@ fn run_embedded_shell(config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
+fn run_remote_shell(_config: &CliConfig, remote_url: &str) -> Result<()> {
+    let client = Client::new();
+    println!("skepa_db_cli remote shell ({remote_url}) (type 'help' or 'exit')");
+
+    loop {
+        print!("db> ");
+        io::stdout().flush().context("failed to flush prompt")?;
+
+        let mut line = String::new();
+        if io::stdin()
+            .read_line(&mut line)
+            .context("failed to read input")?
+            == 0
+        {
+            break;
+        }
+
+        let input = line.trim();
+        if input.is_empty() {
+            continue;
+        }
+
+        if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+            break;
+        }
+
+        if input.eq_ignore_ascii_case("help") {
+            print_help();
+            continue;
+        }
+
+        if let Some(rest) = input.strip_prefix("parse ") {
+            match parse(rest) {
+                Ok(cmd) => println!("Parsed as: {cmd:?}"),
+                Err(error) => eprintln!("Parse error: {error}"),
+            }
+            continue;
+        }
+
+        match execute_remote(&client, remote_url, input) {
+            Ok(result) => println!("{}", render_query_result(&result)),
+            Err(error) => eprintln!("{error}"),
+        }
+    }
+
+    Ok(())
+}
+
 fn run_embedded_execute(config: &CliConfig, sql: &str) -> Result<()> {
     let mut db = Database::open(DbConfig::new(config.db_path.clone()))
         .with_context(|| format!("failed to open database at {}", config.db_path.display()))?;
     let result = execute_embedded(&mut db, sql)?;
+    println!("{}", render_query_result(&result));
+    Ok(())
+}
+
+fn run_remote_execute(remote_url: &str, sql: &str) -> Result<()> {
+    let client = Client::new();
+    let result = execute_remote(&client, remote_url, sql)?;
     println!("{}", render_query_result(&result));
     Ok(())
 }
@@ -219,12 +331,10 @@ fn main() {
 fn run() -> Result<()> {
     let config = parse_cli_config()?;
 
-    if let Some(remote_url) = &config.remote_url {
-        bail!("remote mode is not implemented yet: {remote_url}");
-    }
-
-    match &config.mode {
-        CommandMode::Shell => run_embedded_shell(&config),
-        CommandMode::Execute { sql } => run_embedded_execute(&config, sql),
+    match (&config.mode, &config.remote_url) {
+        (CommandMode::Shell, Some(remote_url)) => run_remote_shell(&config, remote_url),
+        (CommandMode::Execute { sql }, Some(remote_url)) => run_remote_execute(remote_url, sql),
+        (CommandMode::Shell, None) => run_embedded_shell(&config),
+        (CommandMode::Execute { sql }, None) => run_embedded_execute(&config, sql),
     }
 }
