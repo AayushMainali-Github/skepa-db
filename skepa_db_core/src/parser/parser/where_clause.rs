@@ -3,7 +3,10 @@ use crate::parser::command::{CompareOp, LogicalOp, Predicate, WhereClause};
 pub(super) fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
     match raw.to_lowercase().as_str() {
         "=" | "eq" => Ok(CompareOp::Eq),
-        "!=" => Err("Operator '!=' is not supported yet. Use '=' for now.".to_string()),
+        "!=" => Err(
+            "Operator '!=' is not supported yet. Use '=' for equality or 'is null'/'is not null' for null checks."
+                .to_string(),
+        ),
         ">" | "gt" => Ok(CompareOp::Gt),
         "<" | "lt" => Ok(CompareOp::Lt),
         ">=" | "gte" => Ok(CompareOp::Gte),
@@ -11,7 +14,7 @@ pub(super) fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
         "like" => Ok(CompareOp::Like),
         "in" => Ok(CompareOp::In),
         _ => Err(format!(
-            "Unknown WHERE operator '{raw}'. Use =|eq|>|gt|<|lt|>=|gte|<=|lte|like|in"
+            "Unknown WHERE operator '{raw}'. Use =|eq|>|gt|<|lt|>=|gte|<=|lte|like|in or 'is null'/'is not null'"
         )),
     }
 }
@@ -114,16 +117,22 @@ fn parse_predicate(
         *idx += 4;
         return Ok(WhereClause::Predicate(p));
     }
-    if *idx + 4 < tokens.len() && tokens[*idx + 1].eq_ignore_ascii_case("in") {
+    if *idx + 2 < tokens.len() && tokens[*idx + 1].eq_ignore_ascii_case("in") {
         if tokens[*idx + 2] != "(" {
-            return Err(usage_msg.to_string());
+            return Err(format!(
+                "Malformed IN list. Use '{} in (value1,value2,...)'",
+                tokens[*idx]
+            ));
+        }
+        if *idx + 3 < tokens.len() && tokens[*idx + 3] == ")" {
+            return Err("IN list cannot be empty".to_string());
         }
         let mut vals: Vec<String> = Vec::new();
         let mut i = *idx + 3;
         while i < tokens.len() {
             if tokens[i] == ")" {
                 if vals.is_empty() {
-                    return Err(usage_msg.to_string());
+                    return Err("IN list cannot be empty".to_string());
                 }
                 let p = Predicate {
                     column: tokens[*idx].clone(),
@@ -140,15 +149,15 @@ fn parse_predicate(
                     continue;
                 }
                 if tokens[i] != "," {
-                    return Err(usage_msg.to_string());
+                    return Err("Malformed IN list. Separate values with commas".to_string());
                 }
                 i += 1;
                 if i >= tokens.len() || tokens[i] == ")" {
-                    return Err(usage_msg.to_string());
+                    return Err("Malformed IN list. Trailing comma is not allowed".to_string());
                 }
             }
         }
-        return Err(usage_msg.to_string());
+        return Err("Malformed IN list. Missing closing ')'".to_string());
     }
     if *idx + 2 < tokens.len() {
         let op = parse_compare_op(&tokens[*idx + 1])?;

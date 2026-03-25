@@ -126,6 +126,7 @@ fn select_with_extra_tokens_errors() {
 fn select_with_bad_where_operator_errors() {
     let err = parse("select * from users where age between 1").unwrap_err();
     assert!(err.to_lowercase().contains("unknown where operator"));
+    assert!(err.to_lowercase().contains("is null"));
 }
 
 #[test]
@@ -222,6 +223,7 @@ fn parse_select_star_with_uppercase_where() {
 fn parse_select_unknown_op_reports_operator() {
     let err = parse("select * from t where a approx 1").unwrap_err();
     assert!(err.to_lowercase().contains("unknown where operator"));
+    assert!(err.to_lowercase().contains("is not null"));
 }
 
 #[test]
@@ -360,9 +362,14 @@ fn parse_select_where_in_list() {
 
 #[test]
 fn parse_select_where_in_invalid_syntax_errors() {
-    assert!(parse("select * from users where id in 1,2").is_err());
-    assert!(parse("select * from users where id in ()").is_err());
-    assert!(parse("select * from users where id in (1,)").is_err());
+    let err = parse("select * from users where id in 1,2").unwrap_err();
+    assert!(err.to_lowercase().contains("malformed in list"));
+
+    let err = parse("select * from users where id in ()").unwrap_err();
+    assert!(err.to_lowercase().contains("in list cannot be empty"));
+
+    let err = parse("select * from users where id in (1,)").unwrap_err();
+    assert!(err.to_lowercase().contains("trailing comma"));
 }
 
 #[test]

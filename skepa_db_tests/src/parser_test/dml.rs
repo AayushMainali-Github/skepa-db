@@ -273,12 +273,14 @@ fn parse_delete_where_like_operator() {
 fn parse_delete_not_equal_reports_not_supported() {
     let err = parse("delete from t where a != 1").unwrap_err();
     assert!(err.to_lowercase().contains("not supported"));
+    assert!(err.to_lowercase().contains("is null"));
 }
 
 #[test]
 fn parse_update_not_equal_reports_not_supported() {
     let err = parse("update t set a = 1 where b != 2").unwrap_err();
     assert!(err.to_lowercase().contains("not supported"));
+    assert!(err.to_lowercase().contains("is not null"));
 }
 
 #[test]
