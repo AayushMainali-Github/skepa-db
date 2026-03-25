@@ -259,6 +259,63 @@ async fn delete_session(
     }))
 }
 
+async fn execute_session(
+    State(state): State<AppState>,
+    Path(session_id): Path<u64>,
+    Json(request): Json<ExecuteRequest>,
+) -> Result<Json<ExecuteResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    if request.sql.trim().is_empty() {
+        warn!(
+            request_id,
+            route = "/session/:id/execute",
+            session_id,
+            "rejected empty sql"
+        );
+        return Err(error_response(request_id, "sql must not be empty"));
+    }
+
+    let session_db = state
+        .sessions
+        .lock()
+        .await
+        .get(&session_id)
+        .cloned()
+        .ok_or_else(|| {
+            warn!(
+                request_id,
+                route = "/session/:id/execute",
+                session_id,
+                "session not found"
+            );
+            error_response(request_id, format!("session {session_id} was not found"))
+        })?;
+
+    let mut db = session_db.lock().await;
+    let result = db.execute(&request.sql).map_err(|error| {
+        warn!(
+            request_id,
+            route = "/session/:id/execute",
+            session_id,
+            error = %error,
+            "request failed"
+        );
+        error_response(request_id, error.to_string())
+    })?;
+
+    info!(
+        request_id,
+        route = "/session/:id/execute",
+        session_id,
+        "request completed"
+    );
+    Ok(Json(ExecuteResponse {
+        ok: true,
+        request_id,
+        result,
+    }))
+}
+
 fn error_response(
     request_id: u64,
     message: impl Into<String>,
@@ -283,6 +340,7 @@ fn build_app(state: AppState) -> Router {
         .route("/batch", post(batch))
         .route("/session", post(create_session))
         .route("/session/{id}", delete(delete_session))
+        .route("/session/{id}/execute", post(execute_session))
         .with_state(state)
 }
 
@@ -520,5 +578,88 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["ok"], true);
         assert_eq!(json["session_id"], 1);
+    }
+
+    #[tokio::test]
+    async fn session_execute_uses_session_scoped_transaction_state() {
+        let app = test_app().await;
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/session")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_response.status(), StatusCode::OK);
+
+        let begin_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/session/1/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"begin"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(begin_response.status(), StatusCode::OK);
+
+        let global_commit_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"commit"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(global_commit_response.status(), StatusCode::BAD_REQUEST);
+
+        let session_commit_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/session/1/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"commit"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(session_commit_response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn session_execute_rejects_unknown_session() {
+        let app = test_app().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/session/999/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"select * from users"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["error"]["message"], "session 999 was not found");
     }
 }
