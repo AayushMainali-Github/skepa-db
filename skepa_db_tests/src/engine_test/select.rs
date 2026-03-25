@@ -47,6 +47,20 @@ fn test_select_where_eq_text() {
 }
 
 #[test]
+fn test_select_where_eq_null_matches_null_values_by_current_engine_semantics() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+    db.execute("insert into users values (2, null)").unwrap();
+
+    let result = db
+        .execute("select id from users where city = null order by id asc")
+        .unwrap();
+    assert_select_result(result, &["id"], vec![vec![Value::Int(2)]]);
+}
+
+#[test]
 fn test_select_where_gt_lt_gte_lte() {
     let mut db = test_db();
     db.execute_legacy("create table nums (id int, value int)")
@@ -535,6 +549,29 @@ fn test_select_order_by_nulls_asc_then_desc() {
         .execute_legacy("select id from t order by city desc")
         .unwrap();
     assert_eq!(desc, "id\n1\n3\n2");
+}
+
+#[test]
+fn test_select_distinct_and_order_by_keep_single_null_with_null_first_in_asc() {
+    let mut db = test_db();
+    db.execute("create table t (city text)").unwrap();
+    db.execute("insert into t values (null)").unwrap();
+    db.execute("insert into t values (null)").unwrap();
+    db.execute(r#"insert into t values ("la")"#).unwrap();
+    db.execute(r#"insert into t values ("ny")"#).unwrap();
+
+    let result = db
+        .execute("select distinct city from t order by city asc")
+        .unwrap();
+    assert_select_result(
+        result,
+        &["city"],
+        vec![
+            vec![Value::Null],
+            vec![Value::Text("la".to_string())],
+            vec![Value::Text("ny".to_string())],
+        ],
+    );
 }
 
 #[test]

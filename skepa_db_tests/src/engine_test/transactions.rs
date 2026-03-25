@@ -245,6 +245,66 @@ fn test_transaction_commit_no_conflict_when_other_table_changes() {
 }
 
 #[test]
+fn test_transaction_conflict_detection_is_scoped_to_touched_tables() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_tx_touched_tables_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut setup = Database::open_legacy(path.clone());
+        setup
+            .execute_legacy("create table a (id int, v int)")
+            .unwrap();
+        setup
+            .execute_legacy("create table b (id int, v int)")
+            .unwrap();
+        setup
+            .execute_legacy("insert into a values (1, 10)")
+            .unwrap();
+        setup
+            .execute_legacy("insert into b values (1, 100)")
+            .unwrap();
+    }
+
+    let mut tx_db = Database::open_legacy(path.clone());
+    let mut other_db = Database::open_legacy(path.clone());
+
+    tx_db.execute("begin").unwrap();
+    assert_select_result(
+        tx_db.execute("select * from a").unwrap(),
+        &["id", "v"],
+        vec![vec![Value::Int(1), Value::Int(10)]],
+    );
+
+    std::thread::sleep(Duration::from_millis(5));
+    other_db
+        .execute_legacy("update b set v = 101 where id = 1")
+        .unwrap();
+
+    assert_transaction_result(tx_db.execute("commit").unwrap(), "transaction committed");
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_transaction_reads_its_own_uncommitted_writes() {
+    let mut db = test_db();
+    db.execute("create table t (id int, v int)").unwrap();
+    db.execute("insert into t values (1, 10)").unwrap();
+
+    db.execute("begin").unwrap();
+    db.execute("update t set v = 11 where id = 1").unwrap();
+
+    assert_select_result(
+        db.execute("select * from t").unwrap(),
+        &["id", "v"],
+        vec![vec![Value::Int(1), Value::Int(11)]],
+    );
+
+    db.execute("rollback").unwrap();
+}
+
+#[test]
 fn test_transaction_rollback_reverts_update_and_delete() {
     let mut db = test_db();
     db.execute_legacy("create table users (id int, name text, age int)")
