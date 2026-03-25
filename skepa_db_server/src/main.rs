@@ -439,15 +439,21 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::{Method, Request};
     use serde_json::{Value, json};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tower::util::ServiceExt;
 
     async fn test_app() -> Router {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after unix epoch")
             .as_nanos();
-        let db_path = std::env::temp_dir().join(format!("skepa-db-server-test-{unique}"));
+        let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let db_path = std::env::temp_dir().join(format!(
+            "skepa-db-server-test-{}-{unique}-{id}",
+            std::process::id()
+        ));
         let config = ServerConfig {
             db_path: db_path.clone(),
             addr: "127.0.0.1:0".parse().expect("valid loopback addr"),

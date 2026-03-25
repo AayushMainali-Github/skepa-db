@@ -79,8 +79,11 @@ impl Database {
         let ends_with_newline = content.ends_with('\n');
         let total_lines = content.lines().count();
 
+        let mut ignored_truncated_tail = false;
+
         for (idx, raw_line) in content.lines().enumerate() {
             if idx + 1 == total_lines && !ends_with_newline {
+                ignored_truncated_tail = true;
                 break;
             }
             let line = raw_line.trim();
@@ -168,6 +171,9 @@ impl Database {
             .map(|tx| (tx.first_line, tx))
             .collect();
         ordered_txs.sort_by_key(|(line, _)| *line);
+        let committed_tx_count = ordered_txs.len();
+        let mut replayed_tx_count = 0usize;
+        let mut skipped_tx_count = 0usize;
 
         for (_, tx) in ordered_txs {
             let before_catalog = self.catalog.clone();
@@ -198,7 +204,17 @@ impl Database {
             {
                 self.catalog = before_catalog;
                 self.storage = before_storage;
+                skipped_tx_count += 1;
+            } else {
+                replayed_tx_count += 1;
             }
+        }
+
+        if committed_tx_count > 0 || ignored_truncated_tail {
+            eprintln!(
+                "skepa-db: recovery replayed {} committed transaction(s), skipped {}, truncated_tail_ignored={}",
+                replayed_tx_count, skipped_tx_count, ignored_truncated_tail
+            );
         }
 
         Ok(())
@@ -212,7 +228,7 @@ impl Database {
 
     pub(super) fn checkpoint_and_truncate_wal(&self) -> Result<(), String> {
         self.storage.checkpoint_all()?;
-        if crate::storage_test_hooks::should_interrupt_checkpoint_after_tables() {
+        if crate::storage_test_hooks::should_interrupt_checkpoint_after_tables(&self.path) {
             return Err("Simulated checkpoint interruption after table persistence".to_string());
         }
         self.truncate_wal()

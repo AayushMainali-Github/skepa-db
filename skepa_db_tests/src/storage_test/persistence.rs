@@ -167,3 +167,38 @@ fn diskstorage_persists_null_values_roundtrip() {
         );
     }
 }
+
+#[test]
+fn interrupted_checkpoint_after_update_recovers_deterministically() {
+    let path = temp_dir("interrupt_checkpoint_update");
+    {
+        let mut db = Database::open_legacy(path.clone());
+        db.execute_legacy("create table users (id int, name text)")
+            .unwrap();
+        db.execute_legacy(r#"insert into users values (1, "ram")"#)
+            .unwrap();
+    }
+
+    {
+        let mut db = Database::open_legacy(path.clone());
+        std::fs::write(
+            path.join(".simulate_interrupt_checkpoint_after_tables"),
+            "1",
+        )
+        .unwrap();
+        let err = db
+            .execute_legacy(r#"update users set name = "shyam" where id = 1"#)
+            .unwrap_err();
+        assert!(err.contains("Simulated checkpoint interruption"));
+    }
+
+    std::fs::remove_file(path.join(".simulate_interrupt_checkpoint_after_tables")).unwrap();
+
+    {
+        let mut db = Database::open_legacy(path.clone());
+        assert_eq!(
+            db.execute_legacy("select * from users").unwrap(),
+            "id\tname\n1\tshyam"
+        );
+    }
+}
