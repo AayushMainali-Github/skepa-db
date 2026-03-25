@@ -220,9 +220,9 @@ async fn delete_session(
     Path(session_id): Path<u64>,
 ) -> Result<Json<SessionDeletedResponse>, (StatusCode, Json<ErrorResponse>)> {
     let request_id = state.next_request_id();
-    let removed = state.sessions.lock().await.remove(&session_id);
+    let session_db = state.sessions.lock().await.get(&session_id).cloned();
 
-    if removed.is_none() {
+    let Some(session_db) = session_db else {
         warn!(
             request_id,
             route = "/session/:id",
@@ -233,7 +233,22 @@ async fn delete_session(
             request_id,
             format!("session {session_id} was not found"),
         ));
+    };
+
+    if session_db.lock().await.has_active_transaction() {
+        warn!(
+            request_id,
+            route = "/session/:id",
+            session_id,
+            "refused to delete session with active transaction"
+        );
+        return Err(error_response(
+            request_id,
+            format!("session {session_id} has an active transaction"),
+        ));
     }
+
+    state.sessions.lock().await.remove(&session_id);
 
     info!(
         request_id,
@@ -656,6 +671,59 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["ok"], true);
         assert_eq!(json["session_id"], 1);
+    }
+
+    #[tokio::test]
+    async fn delete_session_rejects_active_transaction() {
+        let app = test_app().await;
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/session")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_response.status(), StatusCode::OK);
+
+        let begin_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/session/1/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"begin"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(begin_response.status(), StatusCode::OK);
+
+        let delete_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri("/session/1")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(delete_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(delete_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(
+            json["error"]["message"],
+            "session 1 has an active transaction"
+        );
     }
 
     #[tokio::test]

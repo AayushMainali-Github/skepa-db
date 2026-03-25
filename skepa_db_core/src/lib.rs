@@ -193,4 +193,8 @@ impl Database {
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
+
+    pub fn has_active_transaction(&self) -> bool {
+        self.current_tx.is_some()
+    }
 }
