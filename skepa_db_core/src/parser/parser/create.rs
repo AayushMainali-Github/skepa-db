@@ -75,7 +75,7 @@ pub(super) fn parse_drop(tokens: &[String]) -> Result<Command, String> {
     if tokens.len() >= 2 && tokens[1].eq_ignore_ascii_case("index") {
         return parse_drop_index(tokens);
     }
-    Err("Unknown command 'drop'".to_string())
+    Err("DROP currently supports only: drop index on <table> (<col>, ...)".to_string())
 }
 
 fn parse_create_index(tokens: &[String]) -> Result<Command, String> {

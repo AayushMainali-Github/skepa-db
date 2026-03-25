@@ -12,7 +12,10 @@ mod where_clause;
 pub fn parse(input: &str) -> Result<Command, String> {
     let tokens = tokenizer::tokenize(input)?;
     if tokens.is_empty() {
-        return Err("Empty command".to_string());
+        return Err(
+            "Empty command. Supported commands: begin, commit, rollback, create table, create index, drop index, alter table, insert, update, delete, select"
+                .to_string(),
+        );
     }
 
     let keyword = tokens[0].to_lowercase();
@@ -28,6 +31,9 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "update" => dml::parse_update(&tokens),
         "delete" => dml::parse_delete(&tokens),
         "select" => select::parse_select(&tokens),
-        _ => Err(format!("Unknown command '{}'", tokens[0])),
+        _ => Err(format!(
+            "Unknown command '{}'. Supported commands: begin, commit, rollback, create table, create index, drop index, alter table, insert, update, delete, select",
+            tokens[0]
+        )),
     }
 }

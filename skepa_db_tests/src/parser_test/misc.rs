@@ -4,12 +4,22 @@ use super::*;
 fn parse_empty_command_errors() {
     let err = parse("").unwrap_err();
     assert!(err.to_lowercase().contains("empty"));
+    assert!(err.to_lowercase().contains("supported commands"));
 }
 
 #[test]
 fn parse_unknown_command_errors() {
     let err = parse("drop users").unwrap_err();
-    assert!(err.to_lowercase().contains("unknown"));
+    assert!(err.to_lowercase().contains("drop currently supports only"));
+    assert!(err.to_lowercase().contains("drop index"));
+}
+
+#[test]
+fn parse_unknown_top_level_command_lists_supported_commands() {
+    let err = parse("merge into users values (1)").unwrap_err();
+    assert!(err.to_lowercase().contains("unknown command"));
+    assert!(err.to_lowercase().contains("supported commands"));
+    assert!(err.to_lowercase().contains("select"));
 }
 
 #[test]
