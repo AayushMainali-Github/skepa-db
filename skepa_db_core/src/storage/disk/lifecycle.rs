@@ -118,7 +118,7 @@ impl DiskStorage {
         } else {
             format!("{}\n", lines.join("\n"))
         };
-        fs::write(table_file, payload)
+        crate::storage::persistence::write_file_atomic(&table_file, payload.as_bytes())
             .map_err(|e| format!("Failed to write table snapshot for '{table}': {e}"))?;
         self.persist_indexes(table)
     }

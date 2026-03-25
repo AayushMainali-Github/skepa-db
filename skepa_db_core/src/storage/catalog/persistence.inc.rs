@@ -65,7 +65,8 @@ impl Catalog {
 
         let payload = serde_json::to_string_pretty(&CatalogFile { tables, table_constraints })
             .map_err(|e| format!("Failed to serialize catalog as JSON: {e}"))?;
-        fs::write(path, payload).map_err(|e| format!("Failed to write catalog file: {e}"))
+        crate::storage::persistence::write_file_atomic(path, payload.as_bytes())
+            .map_err(|e| format!("Failed to write catalog file: {e}"))
     }
 
     /// Loads catalog metadata from disk.

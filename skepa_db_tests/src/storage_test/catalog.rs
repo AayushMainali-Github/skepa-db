@@ -135,3 +135,37 @@ fn catalog_save_load_roundtrip_with_constraints() {
     assert_eq!(posts.foreign_keys[0].columns, vec!["user_id".to_string()]);
     assert_eq!(posts.foreign_keys[0].ref_table, "users");
 }
+
+#[test]
+fn catalog_save_replaces_file_without_temp_artifacts() {
+    let mut catalog = Catalog::new();
+    catalog
+        .create_table(
+            "users".to_string(),
+            vec![ColumnDef {
+                name: "id".to_string(),
+                dtype: DataType::Int,
+                primary_key: true,
+                unique: false,
+                not_null: true,
+            }],
+            vec![],
+        )
+        .unwrap();
+
+    let path = temp_dir("catalog_atomic_replace");
+    std::fs::create_dir_all(&path).unwrap();
+    let catalog_path = path.join("catalog.json");
+    std::fs::write(&catalog_path, "{\"stale\":true}").unwrap();
+
+    catalog.save_to_path(&catalog_path).unwrap();
+
+    let content = std::fs::read_to_string(&catalog_path).unwrap();
+    assert!(content.contains("\"users\""));
+
+    let entries = std::fs::read_dir(&path)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(entries, vec!["catalog.json".to_string()]);
+}

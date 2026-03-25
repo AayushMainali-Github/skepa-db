@@ -309,8 +309,11 @@ impl DiskStorage {
 
         let payload = serde_json::to_string_pretty(&TableIndexSnapshot { pk, unique, secondary })
             .map_err(|e| format!("Failed to serialize indexes for '{table}': {e}"))?;
-        fs::write(self.index_file_path(table), payload)
-            .map_err(|e| format!("Failed to write index file for '{table}': {e}"))
+        crate::storage::persistence::write_file_atomic(
+            &self.index_file_path(table),
+            payload.as_bytes(),
+        )
+        .map_err(|e| format!("Failed to write index file for '{table}': {e}"))
     }
 
     fn load_indexes_from_disk(&mut self, table: &str, schema: &Schema) -> Result<(), String> {

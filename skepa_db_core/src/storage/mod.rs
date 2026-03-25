@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod disk;
 pub mod engine;
+pub mod persistence;
 pub mod schema;
 
 // Re-export main types for convenience

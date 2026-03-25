@@ -1,4 +1,5 @@
 use super::*;
+use skepa_db_core::types::value::Value;
 
 #[test]
 fn wal_is_truncated_after_write() {
@@ -433,4 +434,37 @@ fn recovery_mixed_committed_valid_and_invalid_txs_keeps_only_valid_effects() {
             "id\tpid\n10\t1\n20\t3"
         );
     }
+}
+
+#[test]
+fn recovery_ignores_truncated_wal_tail_record() {
+    let path = temp_dir("wal_truncated_tail");
+    {
+        let mut db = Database::open_legacy(path.clone());
+        db.execute_legacy("create table users (id int, name text)")
+            .unwrap();
+    }
+
+    std::fs::write(
+        path.join("wal.log"),
+        concat!(
+            "BEGIN 70\n",
+            "OP 70 insert into users values (1, \"ram\")\n",
+            "COMMIT 70\n",
+            "BEGIN 71\n",
+            "OP 71 insert into users values (2, \"shy\")"
+        ),
+    )
+    .unwrap();
+
+    let mut db = Database::open_legacy(path.clone());
+    let result = db.execute("select * from users order by id asc").unwrap();
+    let rows = match result {
+        skepa_db_core::query_result::QueryResult::Select { rows, .. } => rows,
+        other => panic!("expected select result, got {other:?}"),
+    };
+    assert_eq!(
+        rows,
+        vec![vec![Value::Int(1), Value::Text("ram".to_string())]]
+    );
 }

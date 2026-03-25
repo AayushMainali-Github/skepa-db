@@ -7,7 +7,17 @@ impl Database {
 
     pub(super) fn load_catalog(path: &Path) -> Catalog {
         let catalog_path = path.join("catalog.json");
-        Catalog::load_from_path(&catalog_path).unwrap_or_else(|_| Catalog::new())
+        match Catalog::load_from_path(&catalog_path) {
+            Ok(catalog) => catalog,
+            Err(err) => {
+                eprintln!(
+                    "skepa-db: catalog load failed at '{}', starting with empty catalog: {}",
+                    catalog_path.display(),
+                    err
+                );
+                Catalog::new()
+            }
+        }
     }
 
     pub(super) fn bootstrap_tables(&mut self) -> DbResult<()> {
@@ -41,6 +51,10 @@ impl Database {
             .map_err(|e| format!("Failed to write WAL entry: {e}"))?;
         f.write_all(b"\n")
             .map_err(|e| format!("Failed to write WAL newline: {e}"))?;
+        f.flush()
+            .map_err(|e| format!("Failed to flush WAL entry: {e}"))?;
+        f.sync_data()
+            .map_err(|e| format!("Failed to sync WAL entry: {e}"))?;
         Ok(())
     }
 
@@ -62,7 +76,13 @@ impl Database {
 
         let mut txs: std::collections::HashMap<u64, ReplayTx> = std::collections::HashMap::new();
 
+        let ends_with_newline = content.ends_with('\n');
+        let total_lines = content.lines().count();
+
         for (idx, raw_line) in content.lines().enumerate() {
+            if idx + 1 == total_lines && !ends_with_newline {
+                break;
+            }
             let line = raw_line.trim();
             if line.is_empty() {
                 continue;
@@ -185,11 +205,16 @@ impl Database {
     }
 
     pub(super) fn truncate_wal(&self) -> Result<(), String> {
-        fs::write(self.path.join("wal.log"), "").map_err(|e| format!("Failed to truncate WAL: {e}"))
+        let wal_path = self.path.join("wal.log");
+        crate::storage::persistence::write_file_atomic(&wal_path, b"")
+            .map_err(|e| format!("Failed to truncate WAL: {e}"))
     }
 
     pub(super) fn checkpoint_and_truncate_wal(&self) -> Result<(), String> {
         self.storage.checkpoint_all()?;
+        if crate::storage_test_hooks::should_interrupt_checkpoint_after_tables() {
+            return Err("Simulated checkpoint interruption after table persistence".to_string());
+        }
         self.truncate_wal()
     }
 }

@@ -14,6 +14,7 @@ pub mod types;
 
 mod legacy_render;
 mod recovery;
+mod storage_test_hooks;
 mod transactions;
 
 use config::DbConfig;
