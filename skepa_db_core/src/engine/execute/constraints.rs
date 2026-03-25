@@ -142,27 +142,33 @@ fn matches_where(cell: &Value, dtype: &DataType, op: &CompareOp, rhs_token: &str
     }
 }
 
+fn comparison_type_mismatch(dtype_name: &str) -> String {
+    format!(
+        "Comparison type mismatch for {dtype_name} column. Operators gt/lt/gte/lte require a {dtype_name} value on the right-hand side."
+    )
+}
+
 fn compare_order(lhs: &Value, rhs: &Value, dtype: &DataType) -> Result<Ordering, String> {
     match dtype {
         DataType::Int => match (lhs, rhs) {
             (Value::Int(a), Value::Int(b)) => Ok(a.cmp(b)),
-            _ => Err("Type mismatch while evaluating int comparison".to_string()),
+            _ => Err(comparison_type_mismatch("int")),
         },
         DataType::BigInt => match (lhs, rhs) {
             (Value::BigInt(a), Value::BigInt(b)) => Ok(a.cmp(b)),
-            _ => Err("Type mismatch while evaluating bigint comparison".to_string()),
+            _ => Err(comparison_type_mismatch("bigint")),
         },
         DataType::Decimal { .. } => match (lhs, rhs) {
             (Value::Decimal(a), Value::Decimal(b)) => Ok(a.cmp(b)),
-            _ => Err("Type mismatch while evaluating decimal comparison".to_string()),
+            _ => Err(comparison_type_mismatch("decimal")),
         },
         DataType::Date => match (lhs, rhs) {
             (Value::Date(a), Value::Date(b)) => Ok(a.cmp(b)),
-            _ => Err("Type mismatch while evaluating date comparison".to_string()),
+            _ => Err(comparison_type_mismatch("date")),
         },
         DataType::Timestamp => match (lhs, rhs) {
             (Value::Timestamp(a), Value::Timestamp(b)) => Ok(a.cmp(b)),
-            _ => Err("Type mismatch while evaluating timestamp comparison".to_string()),
+            _ => Err(comparison_type_mismatch("timestamp")),
         },
         _ => Err(
             "Operator gt/lt/gte/lte is only valid for int|bigint|decimal|date|timestamp columns."
