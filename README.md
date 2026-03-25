@@ -85,11 +85,18 @@ Keep that folder safe; it contains table data, catalog metadata, and WAL.
 
 ## Syntax and Behavior Reference
 
-All syntax and behavior details are documented in:
+Command syntax reference:
 
 - `Syntax.md`
 
-`Syntax.md` is the source of truth for supported SQL-like commands and semantics.
+Implementation semantics and product behavior:
+
+- `docs/sql-dialect.md`
+- `docs/transactions.md`
+- `docs/storage.md`
+- `docs/api.md`
+
+`Syntax.md` describes supported command forms. The `docs/` files describe the current engine, transaction, storage, and API semantics as implemented.
 
 ## Quality Gates
 
