@@ -1,11 +1,12 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use skepa_db_core::Database;
 use skepa_db_core::config::DbConfig;
 use skepa_db_core::query_result::QueryResult;
+use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -26,11 +27,17 @@ struct AppState {
     db: Arc<Mutex<Database>>,
     config: ServerConfig,
     next_request_id: Arc<AtomicU64>,
+    next_session_id: Arc<AtomicU64>,
+    sessions: Arc<Mutex<HashMap<u64, Arc<Mutex<Database>>>>>,
 }
 
 impl AppState {
     fn next_request_id(&self) -> u64 {
         self.next_request_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn next_session_id(&self) -> u64 {
+        self.next_session_id.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -82,6 +89,20 @@ struct BatchResponse {
     ok: bool,
     request_id: u64,
     results: Vec<QueryResult>,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionResponse {
+    ok: bool,
+    request_id: u64,
+    session_id: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionDeletedResponse {
+    ok: bool,
+    request_id: u64,
+    session_id: u64,
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -175,6 +196,69 @@ async fn batch(
     }))
 }
 
+async fn create_session(
+    State(state): State<AppState>,
+) -> Result<Json<SessionResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    let session_id = state.next_session_id();
+    let session_db =
+        Database::open(DbConfig::new(state.config.db_path.clone())).map_err(|error| {
+            warn!(request_id, route = "/session", error = %error, "session creation failed");
+            error_response(request_id, error.to_string())
+        })?;
+
+    state
+        .sessions
+        .lock()
+        .await
+        .insert(session_id, Arc::new(Mutex::new(session_db)));
+
+    info!(
+        request_id,
+        route = "/session",
+        session_id,
+        "session created"
+    );
+    Ok(Json(SessionResponse {
+        ok: true,
+        request_id,
+        session_id,
+    }))
+}
+
+async fn delete_session(
+    State(state): State<AppState>,
+    Path(session_id): Path<u64>,
+) -> Result<Json<SessionDeletedResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    let removed = state.sessions.lock().await.remove(&session_id);
+
+    if removed.is_none() {
+        warn!(
+            request_id,
+            route = "/session/:id",
+            session_id,
+            "session not found"
+        );
+        return Err(error_response(
+            request_id,
+            format!("session {session_id} was not found"),
+        ));
+    }
+
+    info!(
+        request_id,
+        route = "/session/:id",
+        session_id,
+        "session deleted"
+    );
+    Ok(Json(SessionDeletedResponse {
+        ok: true,
+        request_id,
+        session_id,
+    }))
+}
+
 fn error_response(
     request_id: u64,
     message: impl Into<String>,
@@ -197,6 +281,8 @@ fn build_app(state: AppState) -> Router {
         .route("/version", get(version))
         .route("/execute", post(execute))
         .route("/batch", post(batch))
+        .route("/session", post(create_session))
+        .route("/session/{id}", delete(delete_session))
         .with_state(state)
 }
 
@@ -237,6 +323,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db: Arc::new(Mutex::new(db)),
         config,
         next_request_id: Arc::new(AtomicU64::new(1)),
+        next_session_id: Arc::new(AtomicU64::new(1)),
+        sessions: Arc::new(Mutex::new(HashMap::new())),
     };
     let app = build_app(state.clone());
 
@@ -275,6 +363,8 @@ mod tests {
             db: Arc::new(Mutex::new(db)),
             config,
             next_request_id: Arc::new(AtomicU64::new(1)),
+            next_session_id: Arc::new(AtomicU64::new(1)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
         };
         build_app(state)
     }
@@ -370,5 +460,65 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["ok"], false);
         assert_eq!(json["error"]["message"], "sql must not be empty");
+    }
+
+    #[tokio::test]
+    async fn create_session_returns_session_id() {
+        let app = test_app().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/session")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["session_id"], 1);
+    }
+
+    #[tokio::test]
+    async fn delete_session_removes_existing_session() {
+        let app = test_app().await;
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/session")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri("/session/1")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["session_id"], 1);
     }
 }
