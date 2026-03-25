@@ -5,6 +5,8 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use skepa_db_core::Database;
 use skepa_db_core::config::DbConfig;
+use skepa_db_core::parser::command::Command;
+use skepa_db_core::parser::parser::parse;
 use skepa_db_core::query_result::QueryResult;
 use std::collections::HashMap;
 use std::env;
@@ -131,10 +133,7 @@ async fn execute(
     Json(request): Json<ExecuteRequest>,
 ) -> Result<Json<ExecuteResponse>, (StatusCode, Json<ErrorResponse>)> {
     let request_id = state.next_request_id();
-    if request.sql.trim().is_empty() {
-        warn!(request_id, route = "/execute", "rejected empty sql");
-        return Err(error_response(request_id, "sql must not be empty"));
-    }
+    validate_global_sql(request_id, "/execute", &request.sql)?;
 
     let mut db = state.db.lock().await;
     let result = db.execute(&request.sql).map_err(|error| {
@@ -164,17 +163,7 @@ async fn batch(
     let mut db = state.db.lock().await;
 
     for sql in request.statements {
-        if sql.trim().is_empty() {
-            warn!(
-                request_id,
-                route = "/batch",
-                "rejected empty statement in batch"
-            );
-            return Err(error_response(
-                request_id,
-                "batch statements must not be empty",
-            ));
-        }
+        validate_global_sql(request_id, "/batch", &sql)?;
 
         let result = db.execute(&sql).map_err(|error| {
             warn!(request_id, route = "/batch", error = %error, "batch request failed");
@@ -314,6 +303,38 @@ async fn execute_session(
         request_id,
         result,
     }))
+}
+
+fn validate_global_sql(
+    request_id: u64,
+    route: &'static str,
+    sql: &str,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    if sql.trim().is_empty() {
+        warn!(request_id, route, "rejected empty sql");
+        return Err(error_response(request_id, "sql must not be empty"));
+    }
+
+    let command = parse(sql).map_err(|error| {
+        warn!(request_id, route, error = %error, "failed to parse sql");
+        error_response(request_id, error)
+    })?;
+
+    if matches!(
+        command,
+        Command::Begin | Command::Commit | Command::Rollback
+    ) {
+        warn!(
+            request_id,
+            route, "rejected transaction command on global endpoint"
+        );
+        return Err(error_response(
+            request_id,
+            "transaction commands require a session endpoint",
+        ));
+    }
+
+    Ok(())
 }
 
 fn error_response(
@@ -518,6 +539,63 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["ok"], false);
         assert_eq!(json["error"]["message"], "sql must not be empty");
+    }
+
+    #[tokio::test]
+    async fn execute_endpoint_rejects_transaction_commands() {
+        let app = test_app().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"begin"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(
+            json["error"]["message"],
+            "transaction commands require a session endpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_endpoint_rejects_transaction_commands() {
+        let app = test_app().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/batch")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "statements": ["create table users (id int)", "begin"]
+                        })
+                        .to_string(),
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(
+            json["error"]["message"],
+            "transaction commands require a session endpoint"
+        );
     }
 
     #[tokio::test]
