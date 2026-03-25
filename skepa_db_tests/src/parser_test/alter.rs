@@ -111,15 +111,66 @@ fn parse_alter_drop_not_null() {
 
 #[test]
 fn parse_alter_add_unique_empty_cols_errors() {
-    assert!(parse("alter table users add unique()").is_err());
+    let err = parse("alter table users add unique()").unwrap_err();
+    assert!(
+        err.to_lowercase()
+            .contains("constraint column list cannot be empty")
+    );
 }
 
 #[test]
 fn parse_alter_drop_unique_empty_cols_errors() {
-    assert!(parse("alter table users drop unique()").is_err());
+    let err = parse("alter table users drop unique()").unwrap_err();
+    assert!(
+        err.to_lowercase()
+            .contains("constraint column list cannot be empty")
+    );
 }
 
 #[test]
 fn parse_alter_add_fk_missing_reference_cols_errors() {
-    assert!(parse("alter table c add foreign key (pid) references p").is_err());
+    let err = parse("alter table c add foreign key (pid) references p").unwrap_err();
+    assert!(
+        err.to_lowercase()
+            .contains("constraint column list must start with '('")
+    );
+}
+
+#[test]
+fn parse_alter_unknown_head_lists_supported_forms() {
+    let err = parse("alter table t rename column a to b").unwrap_err();
+    assert!(err.to_lowercase().contains("alter table supports"));
+    assert!(err.to_lowercase().contains("add unique"));
+    assert!(err.to_lowercase().contains("alter column"));
+}
+
+#[test]
+fn parse_alter_add_foreign_key_bad_shape_shows_usage() {
+    let err = parse("alter table c add foreign(pid) references p(id)").unwrap_err();
+    assert!(
+        err.to_lowercase()
+            .contains("bad alter table add foreign key syntax")
+    );
+    assert!(err.to_lowercase().contains("references"));
+}
+
+#[test]
+fn parse_alter_drop_foreign_key_bad_shape_shows_usage() {
+    let err = parse("alter table c drop foreign(pid) references p(id)").unwrap_err();
+    assert!(
+        err.to_lowercase()
+            .contains("bad alter table drop foreign key syntax")
+    );
+    assert!(err.to_lowercase().contains("references"));
+}
+
+#[test]
+fn parse_alter_column_bad_shape_shows_supported_forms() {
+    let err = parse("alter table t alter column a set null").unwrap_err();
+    assert!(
+        err.to_lowercase()
+            .contains("alter table alter column supports")
+    );
+    assert!(err.to_lowercase().contains("set not null"));
+    assert!(err.to_lowercase().contains("drop not null"));
 }

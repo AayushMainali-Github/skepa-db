@@ -11,25 +11,39 @@ pub(super) fn parse_alter(tokens: &[String]) -> Result<Command, String> {
         "add" => parse_alter_add(tokens)?,
         "drop" => parse_alter_drop(tokens)?,
         "alter" => parse_alter_column(tokens)?,
-        _ => return Err("Usage: alter table <table> add|drop|alter ...".to_string()),
+        _ => {
+            return Err(
+                "ALTER TABLE supports: add unique(...), add foreign key(...) references ... , drop unique(...), drop foreign key(...) references ..., alter column <col> set not null, alter column <col> drop not null"
+                    .to_string(),
+            )
+        }
     };
     Ok(Command::Alter { table, action })
 }
 
 fn parse_alter_add(tokens: &[String]) -> Result<AlterAction, String> {
     if tokens.len() < 6 {
-        return Err("Usage: alter table <table> add ...".to_string());
+        return Err(
+            "ALTER TABLE ADD supports: unique(<col>, ...) or foreign key(<col>, ...) references <table>(<col>, ...)"
+                .to_string(),
+        );
     }
     if tokens[4].eq_ignore_ascii_case("unique") {
         let (cols, next) = parse_column_name_list(tokens, 5, tokens.len())?;
         if next != tokens.len() {
-            return Err("Bad ALTER TABLE ADD UNIQUE syntax".to_string());
+            return Err(
+                "Bad ALTER TABLE ADD UNIQUE syntax. Use: alter table <table> add unique(<col>, ...)"
+                    .to_string(),
+            );
         }
         return Ok(AlterAction::AddUnique(cols));
     }
     if tokens[4].eq_ignore_ascii_case("foreign") {
         if tokens.len() < 10 || !tokens[5].eq_ignore_ascii_case("key") {
-            return Err("Bad ALTER TABLE ADD FOREIGN KEY syntax".to_string());
+            return Err(
+                "Bad ALTER TABLE ADD FOREIGN KEY syntax. Use: alter table <table> add foreign key(<col>, ...) references <table>(<col>, ...)"
+                    .to_string(),
+            );
         }
         let (cols, after_cols) = parse_column_name_list(tokens, 6, tokens.len())?;
         if after_cols >= tokens.len() || !tokens[after_cols].eq_ignore_ascii_case("references") {
@@ -66,7 +80,10 @@ fn parse_alter_add(tokens: &[String]) -> Result<AlterAction, String> {
             break;
         }
         if next != tokens.len() {
-            return Err("Bad ALTER TABLE ADD FOREIGN KEY syntax".to_string());
+            return Err(
+                "Bad ALTER TABLE ADD FOREIGN KEY syntax. Supported tail options: on delete <action>, on update <action>"
+                    .to_string(),
+            );
         }
         return Ok(AlterAction::AddForeignKey {
             columns: cols,
@@ -81,18 +98,27 @@ fn parse_alter_add(tokens: &[String]) -> Result<AlterAction, String> {
 
 fn parse_alter_drop(tokens: &[String]) -> Result<AlterAction, String> {
     if tokens.len() < 6 {
-        return Err("Usage: alter table <table> drop ...".to_string());
+        return Err(
+            "ALTER TABLE DROP supports: unique(<col>, ...) or foreign key(<col>, ...) references <table>(<col>, ...)"
+                .to_string(),
+        );
     }
     if tokens[4].eq_ignore_ascii_case("unique") {
         let (cols, next) = parse_column_name_list(tokens, 5, tokens.len())?;
         if next != tokens.len() {
-            return Err("Bad ALTER TABLE DROP UNIQUE syntax".to_string());
+            return Err(
+                "Bad ALTER TABLE DROP UNIQUE syntax. Use: alter table <table> drop unique(<col>, ...)"
+                    .to_string(),
+            );
         }
         return Ok(AlterAction::DropUnique(cols));
     }
     if tokens[4].eq_ignore_ascii_case("foreign") {
         if tokens.len() < 10 || !tokens[5].eq_ignore_ascii_case("key") {
-            return Err("Bad ALTER TABLE DROP FOREIGN KEY syntax".to_string());
+            return Err(
+                "Bad ALTER TABLE DROP FOREIGN KEY syntax. Use: alter table <table> drop foreign key(<col>, ...) references <table>(<col>, ...)"
+                    .to_string(),
+            );
         }
         let (cols, after_cols) = parse_column_name_list(tokens, 6, tokens.len())?;
         if after_cols >= tokens.len() || !tokens[after_cols].eq_ignore_ascii_case("references") {
@@ -106,7 +132,10 @@ fn parse_alter_drop(tokens: &[String]) -> Result<AlterAction, String> {
         let ref_table = tokens[after_cols + 1].clone();
         let (ref_cols, next) = parse_column_name_list(tokens, after_cols + 2, tokens.len())?;
         if next != tokens.len() {
-            return Err("Bad ALTER TABLE DROP FOREIGN KEY syntax".to_string());
+            return Err(
+                "Bad ALTER TABLE DROP FOREIGN KEY syntax. Use: alter table <table> drop foreign key(<col>, ...) references <table>(<col>, ...)"
+                    .to_string(),
+            );
         }
         return Ok(AlterAction::DropForeignKey {
             columns: cols,
@@ -119,7 +148,10 @@ fn parse_alter_drop(tokens: &[String]) -> Result<AlterAction, String> {
 
 fn parse_alter_column(tokens: &[String]) -> Result<AlterAction, String> {
     if tokens.len() < 9 || !tokens[4].eq_ignore_ascii_case("column") {
-        return Err("Usage: alter table <table> alter column <col> set|drop not null".to_string());
+        return Err(
+            "ALTER TABLE ALTER COLUMN supports: alter column <col> set not null or alter column <col> drop not null"
+                .to_string(),
+        );
     }
     let col = tokens[5].clone();
     if tokens[6].eq_ignore_ascii_case("set")
@@ -136,5 +168,8 @@ fn parse_alter_column(tokens: &[String]) -> Result<AlterAction, String> {
     {
         return Ok(AlterAction::DropNotNull(col));
     }
-    Err("Usage: alter table <table> alter column <col> set|drop not null".to_string())
+    Err(
+        "ALTER TABLE ALTER COLUMN supports: alter column <col> set not null or alter column <col> drop not null"
+            .to_string(),
+    )
 }
