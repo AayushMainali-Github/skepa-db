@@ -28,19 +28,22 @@ fn create_rejects_unknown_datatype() {
 #[test]
 fn create_missing_columns_errors() {
     let err = parse("create table users").unwrap_err();
-    assert!(err.to_lowercase().contains("usage: create"));
+    assert!(err.to_lowercase().contains("create currently supports"));
+    assert!(err.to_lowercase().contains("create table"));
 }
 
 #[test]
 fn create_requires_table_keyword() {
     let err = parse("create users (id int)").unwrap_err();
-    assert!(err.to_lowercase().contains("usage: create"));
+    assert!(err.to_lowercase().contains("create currently supports"));
+    assert!(err.to_lowercase().contains("create index"));
 }
 
 #[test]
 fn create_requires_parentheses() {
     let err = parse("create table users id int").unwrap_err();
-    assert!(err.to_lowercase().contains("usage: create"));
+    assert!(err.to_lowercase().contains("create currently supports"));
+    assert!(err.to_lowercase().contains("create table"));
 }
 
 #[test]
@@ -136,7 +139,9 @@ fn parse_create_bad_decimal_params_errors() {
 #[test]
 fn parse_create_bad_varchar_size_errors() {
     let err = parse("create table t (v varchar(0))").unwrap_err();
-    assert!(err.to_lowercase().contains("varchar"));
+    let e = err.to_lowercase();
+    assert!(e.contains("varchar"));
+    assert!(e.contains("requires n > 0") || e.contains("use: varchar"));
 }
 
 #[test]
@@ -254,12 +259,14 @@ fn parse_create_decimal_spaces_in_paren() {
 fn parse_create_decimal_missing_scale_errors() {
     let err = parse("create table t (a decimal(8))").unwrap_err();
     assert!(err.to_lowercase().contains("decimal"));
+    assert!(err.to_lowercase().contains("precision"));
 }
 
 #[test]
 fn parse_create_varchar_missing_size_errors() {
     let err = parse("create table t (a varchar)").unwrap_err();
     assert!(err.to_lowercase().contains("varchar"));
+    assert!(err.to_lowercase().contains("size"));
 }
 
 #[test]
@@ -575,5 +582,14 @@ fn parse_create_index_basic() {
 
 #[test]
 fn parse_create_index_missing_table_errors() {
-    assert!(parse("create index on (id)").is_err());
+    let err = parse("create index on (id)").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: create index on"));
+}
+
+#[test]
+fn parse_create_unknown_table_constraint_lists_supported_forms() {
+    let err = parse("create table t (a int, foreign(a) references p(id))").unwrap_err();
+    let e = err.to_lowercase();
+    assert!(e.contains("bad foreign key constraint"));
+    assert!(e.contains("references"));
 }

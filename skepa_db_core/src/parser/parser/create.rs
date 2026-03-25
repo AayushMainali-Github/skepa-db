@@ -8,10 +8,16 @@ pub(super) fn parse_create(tokens: &[String]) -> Result<Command, String> {
     }
     // create table <table> ( <col> <type> [, <col> <type> ...] )
     if tokens.len() < 7 {
-        return Err("Usage: create table <table> (<col> <type>, ...)".to_string());
+        return Err(
+            "CREATE currently supports: create table <table> (<col> <type>, ...) or create index on <table> (<col>, ...)"
+                .to_string(),
+        );
     }
     if !tokens[1].eq_ignore_ascii_case("table") {
-        return Err("Usage: create table <table> (<col> <type>, ...)".to_string());
+        return Err(
+            "CREATE currently supports: create table <table> (<col> <type>, ...) or create index on <table> (<col>, ...)"
+                .to_string(),
+        );
     }
     if tokens[3] != "(" || tokens[tokens.len() - 1] != ")" {
         return Err("CREATE requires parenthesized column definitions".to_string());
@@ -122,7 +128,10 @@ pub(super) fn parse_datatype_in_create(
     match t.as_str() {
         "varchar" => {
             if start + 3 >= end || tokens[start + 1] != "(" || tokens[start + 3] != ")" {
-                return Err("Bad varchar type. Use varchar(n)".to_string());
+                return Err(
+                    "Bad varchar type. Use: varchar(<size>) where <size> is a positive integer"
+                        .to_string(),
+                );
             }
             let combined = format!("varchar({})", tokens[start + 2]);
             Ok((parse_datatype(&combined)?, start + 4))
@@ -133,7 +142,7 @@ pub(super) fn parse_datatype_in_create(
                 || tokens[start + 3] != ","
                 || tokens[start + 5] != ")"
             {
-                return Err("Bad decimal type. Use decimal(p,s)".to_string());
+                return Err("Bad decimal type. Use: decimal(<precision>,<scale>)".to_string());
             }
             let combined = format!("decimal({},{})", tokens[start + 2], tokens[start + 4]);
             Ok((parse_datatype(&combined)?, start + 6))
@@ -250,5 +259,8 @@ fn parse_table_constraint_in_create(
             next,
         ));
     }
-    Err("Unknown table constraint".to_string())
+    Err(
+        "Unknown table constraint. Supported table constraints: primary key(...), unique(...), foreign key(...) references <table>(...)"
+            .to_string(),
+    )
 }
