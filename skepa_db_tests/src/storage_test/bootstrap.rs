@@ -144,3 +144,24 @@ fn empty_wal_file_is_handled() {
     let out = reopened.execute_legacy("select * from users").unwrap();
     assert_eq!(out, "id\tname");
 }
+
+#[test]
+fn malformed_catalog_falls_back_to_empty_database_on_open() {
+    let path = temp_dir("malformed_catalog_fallback");
+    std::fs::create_dir_all(path.join("tables")).unwrap();
+    std::fs::create_dir_all(path.join("indexes")).unwrap();
+    std::fs::write(path.join("catalog.json"), "{ not valid json").unwrap();
+    std::fs::write(path.join("wal.log"), "").unwrap();
+
+    let mut db = Database::open_legacy(path.clone());
+    let err = db.execute_legacy("select * from users").unwrap_err();
+    assert!(err.to_lowercase().contains("does not exist"));
+
+    db.execute_legacy("create table users (id int, name text)")
+        .unwrap();
+    db.execute_legacy(r#"insert into users values (1, "ram")"#)
+        .unwrap();
+
+    let reopened = Catalog::load_from_path(&path.join("catalog.json")).unwrap();
+    assert!(reopened.schema("users").is_ok());
+}
