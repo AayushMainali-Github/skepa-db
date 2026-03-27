@@ -2,11 +2,15 @@
 /target/
 **/*.rs.bk
 Cargo.lock
-
+target
 # OS/editor
 .DS_Store
+Thumbs.db
+Desktop.ini
 .idea/
 .vscode/
+*.orig
+*.rej
 
 # Local DB runtime data
 /mydb/

@@ -52,6 +52,14 @@ impl StorageEngine for DiskStorage {
         Ok(rows.as_slice())
     }
 
+    fn row(&self, table: &str, index: usize) -> Result<Option<&Row>, String> {
+        let rows = self
+            .tables
+            .get(table)
+            .ok_or_else(|| format!("Table '{}' does not exist in storage", table))?;
+        Ok(rows.get(index))
+    }
+
     fn scan_mut(&mut self, table: &str) -> Result<&mut Vec<Row>, String> {
         self.tables
             .get_mut(table)

@@ -14,12 +14,12 @@ fn handle_select(
     storage: &mut dyn StorageEngine,
 ) -> Result<QueryResult, String> {
     let is_join = join.is_some();
-    let (select_schema, base_rows): (Schema, Vec<Row>) = if let Some(join_clause) = join {
-        build_join_rows(catalog, storage, &table, &join_clause)?
+    let (select_schema, base_rows): (Schema, Option<Vec<Row>>) = if let Some(join_clause) = join {
+        let (schema, rows) = build_join_rows(catalog, storage, &table, &join_clause)?;
+        (schema, Some(rows))
     } else {
         let schema = catalog.schema(&table)?;
-        let rows = storage.scan(&table)?;
-        (schema.clone(), rows.to_vec())
+        (schema.clone(), None)
     };
 
     let filtered_rows = if let Some(where_clause) = filter {
@@ -33,7 +33,7 @@ fn handle_select(
         {
             let (_col, val) = simple_eq_filter(&where_clause).expect("eq");
             if let Some(row_idx) = storage.lookup_pk_row_index(&table, &select_schema, &val)? {
-                match base_rows.get(row_idx) {
+                match storage.row(&table, row_idx)? {
                     Some(r) => vec![r.clone()],
                     None => Vec::new(),
                 }
@@ -45,7 +45,7 @@ fn handle_select(
             if let Some(row_idx) =
                 storage.lookup_unique_row_index(&table, &select_schema, &col, &val)?
             {
-                match base_rows.get(row_idx) {
+                match storage.row(&table, row_idx)? {
                     Some(r) => vec![r.clone()],
                     None => Vec::new(),
                 }
@@ -54,16 +54,18 @@ fn handle_select(
             {
                 row_indices
                     .into_iter()
-                    .filter_map(|i| base_rows.get(i).cloned())
+                    .filter_map(|i| storage.row(&table, i).ok().flatten().cloned())
                     .collect()
             } else {
-                filter_rows(&select_schema, &base_rows, &where_clause)?
+                let rows = load_base_rows(&table, storage, base_rows.as_ref())?;
+                filter_rows(&select_schema, &rows, &where_clause)?
             }
         } else {
-            filter_rows(&select_schema, &base_rows, &where_clause)?
+            let rows = load_base_rows(&table, storage, base_rows.as_ref())?;
+            filter_rows(&select_schema, &rows, &where_clause)?
         }
     } else {
-        base_rows.to_vec()
+        load_base_rows(&table, storage, base_rows.as_ref())?
     };
 
     let is_grouped = has_group_or_aggregate(columns.as_ref(), group_by.as_ref());
@@ -224,6 +226,17 @@ fn dedupe_rows(rows: Vec<Row>) -> Vec<Row> {
         }
     }
     out
+}
+
+fn load_base_rows(
+    table: &str,
+    storage: &dyn StorageEngine,
+    preloaded_rows: Option<&Vec<Row>>,
+) -> Result<Vec<Row>, String> {
+    if let Some(rows) = preloaded_rows {
+        return Ok(rows.clone());
+    }
+    Ok(storage.scan(table)?.to_vec())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
