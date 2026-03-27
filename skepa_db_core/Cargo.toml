@@ -12,3 +12,10 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 rust_decimal = "1"
 hex = "0.4"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "core_workloads"
+harness = false
