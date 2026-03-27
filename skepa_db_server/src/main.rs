@@ -14,7 +14,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -114,11 +116,15 @@ struct VersionResponse {
 #[derive(Debug, Deserialize)]
 struct ExecuteRequest {
     sql: String,
+    timeout_ms: Option<u64>,
+    idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct BatchRequest {
     statements: Vec<String>,
+    timeout_ms: Option<u64>,
+    idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,7 +136,25 @@ struct ErrorResponse {
 
 #[derive(Debug, Serialize)]
 struct ErrorBody {
+    code: ApiErrorCode,
     message: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum ApiErrorCode {
+    InvalidRequest,
+    Unauthorized,
+    SqlParseError,
+    TransactionRequiresSession,
+    SessionNotFound,
+    SessionHasActiveTransaction,
+    UniqueViolation,
+    NotNullViolation,
+    ForeignKeyViolation,
+    Conflict,
+    Timeout,
+    ExecutionError,
 }
 
 #[derive(Debug, Serialize)]
@@ -240,7 +264,7 @@ async fn debug_catalog(
     let db = state.db.lock().await;
     let data = db.debug_catalog_json().map_err(|error| {
         warn!(request_id, route = "/debug/catalog", error = %error, "request failed");
-        error_response(request_id, error.to_string())
+        map_db_error_response(request_id, error.to_string())
     })?;
 
     info!(request_id, route = "/debug/catalog", "request completed");
@@ -261,7 +285,7 @@ async fn debug_storage(
     let db = state.db.lock().await;
     let data = db.debug_storage_json().map_err(|error| {
         warn!(request_id, route = "/debug/storage", error = %error, "request failed");
-        error_response(request_id, error.to_string())
+        map_db_error_response(request_id, error.to_string())
     })?;
 
     info!(request_id, route = "/debug/storage", "request completed");
@@ -282,7 +306,7 @@ async fn checkpoint(
     let db = state.db.lock().await;
     db.checkpoint().map_err(|error| {
         warn!(request_id, route = "/checkpoint", error = %error, "checkpoint failed");
-        error_response(request_id, error.to_string())
+        map_db_error_response(request_id, error.to_string())
     })?;
 
     info!(request_id, route = "/checkpoint", "request completed");
@@ -302,11 +326,21 @@ async fn execute(
     validate_auth(&state, &headers, request_id, "/execute")?;
     validate_global_sql(request_id, "/execute", &request.sql)?;
 
-    let mut db = state.db.lock().await;
-    let result = db.execute(&request.sql).map_err(|error| {
-        warn!(request_id, route = "/execute", error = %error, "request failed");
-        error_response(request_id, error.to_string())
-    })?;
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        info!(
+            request_id,
+            route = "/execute",
+            idempotency_key,
+            "received idempotency key"
+        );
+    }
+
+    let result = execute_with_timeout(request_id, "/execute", request.timeout_ms, async {
+        let mut db = state.db.lock().await;
+        db.execute(&request.sql)
+            .map_err(|error| map_db_error_response(request_id, error.to_string()))
+    })
+    .await?;
 
     info!(request_id, route = "/execute", "request completed");
     Ok(Json(ExecuteResponse {
@@ -325,21 +359,39 @@ async fn batch(
     validate_auth(&state, &headers, request_id, "/batch")?;
     if request.statements.is_empty() {
         warn!(request_id, route = "/batch", "rejected empty batch");
-        return Err(error_response(request_id, "statements must not be empty"));
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::InvalidRequest,
+            "statements must not be empty",
+        ));
     }
 
-    let mut results = Vec::with_capacity(request.statements.len());
-    let mut db = state.db.lock().await;
-
-    for sql in request.statements {
-        validate_global_sql(request_id, "/batch", &sql)?;
-
-        let result = db.execute(&sql).map_err(|error| {
-            warn!(request_id, route = "/batch", error = %error, "batch request failed");
-            error_response(request_id, error.to_string())
-        })?;
-        results.push(result);
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        info!(
+            request_id,
+            route = "/batch",
+            idempotency_key,
+            "received idempotency key"
+        );
     }
+
+    let results = execute_with_timeout(request_id, "/batch", request.timeout_ms, async {
+        let mut results = Vec::with_capacity(request.statements.len());
+        let mut db = state.db.lock().await;
+
+        for sql in request.statements {
+            validate_global_sql(request_id, "/batch", &sql)?;
+
+            let result = db.execute(&sql).map_err(|error| {
+                warn!(request_id, route = "/batch", error = %error, "batch request failed");
+                map_db_error_response(request_id, error.to_string())
+            })?;
+            results.push(result);
+        }
+
+        Ok(results)
+    })
+    .await?;
 
     info!(
         request_id,
@@ -364,7 +416,7 @@ async fn create_session(
     let session_db =
         Database::open(DbConfig::new(state.config.db_path.clone())).map_err(|error| {
             warn!(request_id, route = "/session", error = %error, "session creation failed");
-            error_response(request_id, error.to_string())
+            map_db_error_response(request_id, error.to_string())
         })?;
 
     state
@@ -404,6 +456,7 @@ async fn delete_session(
         );
         return Err(error_response(
             request_id,
+            ApiErrorCode::SessionNotFound,
             format!("session {session_id} was not found"),
         ));
     };
@@ -417,6 +470,7 @@ async fn delete_session(
         );
         return Err(error_response(
             request_id,
+            ApiErrorCode::SessionHasActiveTransaction,
             format!("session {session_id} has an active transaction"),
         ));
     }
@@ -451,7 +505,11 @@ async fn execute_session(
             session_id,
             "rejected empty sql"
         );
-        return Err(error_response(request_id, "sql must not be empty"));
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::InvalidRequest,
+            "sql must not be empty",
+        ));
     }
 
     let session_db = state
@@ -467,20 +525,34 @@ async fn execute_session(
                 session_id,
                 "session not found"
             );
-            error_response(request_id, format!("session {session_id} was not found"))
+            error_response(
+                request_id,
+                ApiErrorCode::SessionNotFound,
+                format!("session {session_id} was not found"),
+            )
         })?;
 
-    let mut db = session_db.lock().await;
-    let result = db.execute(&request.sql).map_err(|error| {
-        warn!(
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        info!(
             request_id,
             route = "/session/:id/execute",
             session_id,
-            error = %error,
-            "request failed"
+            idempotency_key,
+            "received idempotency key"
         );
-        error_response(request_id, error.to_string())
-    })?;
+    }
+
+    let result = execute_with_timeout(
+        request_id,
+        "/session/:id/execute",
+        request.timeout_ms,
+        async {
+            let mut db = session_db.lock().await;
+            db.execute(&request.sql)
+                .map_err(|error| map_db_error_response(request_id, error.to_string()))
+        },
+    )
+    .await?;
 
     info!(
         request_id,
@@ -502,12 +574,16 @@ fn validate_global_sql(
 ) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
     if sql.trim().is_empty() {
         warn!(request_id, route, "rejected empty sql");
-        return Err(error_response(request_id, "sql must not be empty"));
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::InvalidRequest,
+            "sql must not be empty",
+        ));
     }
 
     let command = parse(sql).map_err(|error| {
         warn!(request_id, route, error = %error, "failed to parse sql");
-        error_response(request_id, error)
+        error_response(request_id, ApiErrorCode::SqlParseError, error)
     })?;
 
     if matches!(
@@ -520,6 +596,7 @@ fn validate_global_sql(
         );
         return Err(error_response(
             request_id,
+            ApiErrorCode::TransactionRequiresSession,
             "transaction commands require a session endpoint",
         ));
     }
@@ -529,6 +606,7 @@ fn validate_global_sql(
 
 fn error_response(
     request_id: u64,
+    code: ApiErrorCode,
     message: impl Into<String>,
 ) -> (StatusCode, Json<ErrorResponse>) {
     (
@@ -537,6 +615,7 @@ fn error_response(
             ok: false,
             request_id,
             error: ErrorBody {
+                code,
                 message: message.into(),
             },
         }),
@@ -553,10 +632,63 @@ fn unauthorized_response(
             ok: false,
             request_id,
             error: ErrorBody {
+                code: ApiErrorCode::Unauthorized,
                 message: message.into(),
             },
         }),
     )
+}
+
+fn map_db_error_response(
+    request_id: u64,
+    message: impl Into<String>,
+) -> (StatusCode, Json<ErrorResponse>) {
+    let message = message.into();
+    let lowercase = message.to_lowercase();
+    let code = if lowercase.contains("unique")
+        || lowercase.contains("primary key")
+        || lowercase.contains("duplicate")
+    {
+        ApiErrorCode::UniqueViolation
+    } else if lowercase.contains("not null") {
+        ApiErrorCode::NotNullViolation
+    } else if lowercase.contains("foreign key") || lowercase.contains("references") {
+        ApiErrorCode::ForeignKeyViolation
+    } else if lowercase.contains("conflict") {
+        ApiErrorCode::Conflict
+    } else if lowercase.contains("parse") || lowercase.contains("syntax") {
+        ApiErrorCode::SqlParseError
+    } else {
+        ApiErrorCode::ExecutionError
+    };
+
+    error_response(request_id, code, message)
+}
+
+async fn execute_with_timeout<T, F>(
+    request_id: u64,
+    route: &'static str,
+    timeout_ms: Option<u64>,
+    future: F,
+) -> Result<T, (StatusCode, Json<ErrorResponse>)>
+where
+    F: std::future::Future<Output = Result<T, (StatusCode, Json<ErrorResponse>)>>,
+{
+    if let Some(timeout_ms) = timeout_ms {
+        match timeout(Duration::from_millis(timeout_ms), future).await {
+            Ok(result) => result,
+            Err(_) => {
+                warn!(request_id, route, timeout_ms, "request timed out");
+                Err(error_response(
+                    request_id,
+                    ApiErrorCode::Timeout,
+                    format!("request exceeded timeout of {timeout_ms}ms"),
+                ))
+            }
+        }
+    } else {
+        future.await
+    }
 }
 
 fn validate_auth(
@@ -728,7 +860,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use tower::util::ServiceExt;
 
-    async fn test_app() -> Router {
+    async fn test_state() -> AppState {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -746,14 +878,17 @@ mod tests {
             tls_terminated: false,
         };
         let db = Database::open(DbConfig::new(db_path)).expect("test db should open");
-        let state = AppState {
+        AppState {
             db: Arc::new(Mutex::new(db)),
             config,
             next_request_id: Arc::new(AtomicU64::new(1)),
             next_session_id: Arc::new(AtomicU64::new(1)),
             sessions: Arc::new(Mutex::new(HashMap::new())),
-        };
-        build_app(state)
+        }
+    }
+
+    async fn test_app() -> Router {
+        build_app(test_state().await)
     }
 
     #[tokio::test]
@@ -846,6 +981,7 @@ mod tests {
             .expect("body should read");
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["ok"], false);
+        assert_eq!(json["error"]["code"], "INVALID_REQUEST");
         assert_eq!(json["error"]["message"], "sql must not be empty");
     }
 
@@ -869,6 +1005,7 @@ mod tests {
             .await
             .expect("body should read");
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["error"]["code"], "TRANSACTION_REQUIRES_SESSION");
         assert_eq!(
             json["error"]["message"],
             "transaction commands require a session endpoint"
@@ -900,6 +1037,7 @@ mod tests {
             .await
             .expect("body should read");
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["error"]["code"], "TRANSACTION_REQUIRES_SESSION");
         assert_eq!(
             json["error"]["message"],
             "transaction commands require a session endpoint"
@@ -1013,6 +1151,7 @@ mod tests {
             .await
             .expect("body should read");
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["error"]["code"], "SESSION_HAS_ACTIVE_TRANSACTION");
         assert_eq!(
             json["error"]["message"],
             "session 1 has an active transaction"
@@ -1099,7 +1238,40 @@ mod tests {
             .expect("body should read");
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["ok"], false);
+        assert_eq!(json["error"]["code"], "SESSION_NOT_FOUND");
         assert_eq!(json["error"]["message"], "session 999 was not found");
+    }
+
+    #[tokio::test]
+    async fn execute_endpoint_returns_timeout_code() {
+        let state = test_state().await;
+        let db_guard = state.db.lock().await;
+        let app = build_app(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "sql": "create table users (id int)",
+                            "timeout_ms": 0
+                        })
+                        .to_string(),
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        drop(db_guard);
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["error"]["code"], "TIMEOUT");
     }
 
     #[tokio::test]
@@ -1138,7 +1310,62 @@ mod tests {
             .await
             .expect("body should read");
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["error"]["code"], "UNAUTHORIZED");
         assert_eq!(json["error"]["message"], "missing bearer token");
+    }
+
+    #[tokio::test]
+    async fn execute_endpoint_maps_constraint_errors_to_stable_codes() {
+        let app = test_app().await;
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"create table users (id int primary key)"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_response.status(), StatusCode::OK);
+
+        let first_insert = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"insert into users values (1)"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(first_insert.status(), StatusCode::OK);
+
+        let duplicate_insert = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"insert into users values (1)"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(duplicate_insert.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(duplicate_insert.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["error"]["code"], "UNIQUE_VIOLATION");
     }
 
     #[tokio::test]

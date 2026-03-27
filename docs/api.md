@@ -118,7 +118,9 @@ Admin/debug endpoints are stateless but protected when auth is enabled.
 
 ```json
 {
-  "sql": "select * from users"
+  "sql": "select * from users",
+  "timeout_ms": 250,
+  "idempotency_key": "req-123"
 }
 ```
 
@@ -130,9 +132,15 @@ Admin/debug endpoints are stateless but protected when auth is enabled.
     "create table users (id int, name text)",
     "insert into users values (1, \"ram\")",
     "select * from users"
-  ]
+  ],
+  "timeout_ms": 500,
+  "idempotency_key": "batch-123"
 }
 ```
+
+`timeout_ms` is optional. It bounds how long the server will wait on the request before returning a timeout error.
+
+`idempotency_key` is optional. The server currently logs and echoes this semantic boundary for clients, but it does not yet deduplicate repeated writes automatically. Clients should treat it as a request identity hint for now.
 
 ## Response Shapes
 
@@ -162,6 +170,7 @@ Error envelope:
   "ok": false,
   "request_id": 1,
   "error": {
+    "code": "TRANSACTION_REQUIRES_SESSION",
     "message": "transaction commands require a session endpoint"
   }
 }
@@ -169,10 +178,26 @@ Error envelope:
 
 ## Current Error Model
 
-- auth failures return `401 Unauthorized`
-- request validation, parser, execution, and admin-operation failures currently return `400 Bad Request`
-- there is not yet a stable machine-readable error code taxonomy
-- parser, execution, validation, and admin errors are surfaced as text messages
+- auth failures return `401 Unauthorized` with `UNAUTHORIZED`
+- request validation, parser, execution, timeout, and admin-operation failures currently return `400 Bad Request`
+- machine-readable error codes now exist for app integrations
+
+Current stable codes:
+
+- `INVALID_REQUEST`
+- `UNAUTHORIZED`
+- `SQL_PARSE_ERROR`
+- `TRANSACTION_REQUIRES_SESSION`
+- `SESSION_NOT_FOUND`
+- `SESSION_HAS_ACTIVE_TRANSACTION`
+- `UNIQUE_VIOLATION`
+- `NOT_NULL_VIOLATION`
+- `FOREIGN_KEY_VIOLATION`
+- `CONFLICT`
+- `TIMEOUT`
+- `EXECUTION_ERROR`
+
+The HTTP status is intentionally coarse right now. Application code should key off `error.code`, not only the status.
 
 ## Admin Endpoint Notes
 
@@ -195,3 +220,10 @@ Commands:
 - `execute "<sql>"`
 
 Remote mode uses the same structured `QueryResult` shape as embedded mode.
+
+## Idempotency Guidance
+
+- Safe read requests like `select ...` may be retried by clients.
+- Write requests should include an `idempotency_key` when the client needs to correlate retries.
+- The current server does not store or enforce idempotency keys yet, so clients should still assume repeated writes can execute more than once.
+- If a request times out, clients should verify resulting state before retrying a write.
