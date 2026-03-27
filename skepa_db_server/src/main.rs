@@ -58,6 +58,35 @@ struct ConfigView {
     tls_terminated: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct MetricsResponse {
+    ok: bool,
+    request_id: u64,
+    metrics: MetricsView,
+}
+
+#[derive(Debug, Serialize)]
+struct MetricsView {
+    request_count_issued: u64,
+    session_count: usize,
+    auth_enabled: bool,
+    active_session_transactions: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugResponse {
+    ok: bool,
+    request_id: u64,
+    data: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct CheckpointResponse {
+    ok: bool,
+    request_id: u64,
+    message: String,
+}
+
 impl AppState {
     fn next_request_id(&self) -> u64 {
         self.next_request_id.fetch_add(1, Ordering::Relaxed)
@@ -170,6 +199,97 @@ async fn config_view(
             auth_enabled: state.config.auth_token.is_some(),
             tls_terminated: state.config.tls_terminated,
         },
+    }))
+}
+
+async fn metrics(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<MetricsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/metrics")?;
+
+    let session_handles: Vec<_> = state.sessions.lock().await.values().cloned().collect();
+    let mut active_session_transactions = 0usize;
+    for session in session_handles {
+        if session.lock().await.has_active_transaction() {
+            active_session_transactions += 1;
+        }
+    }
+
+    info!(request_id, route = "/metrics", "request completed");
+    Ok(Json(MetricsResponse {
+        ok: true,
+        request_id,
+        metrics: MetricsView {
+            request_count_issued: state.next_request_id.load(Ordering::Relaxed) - 1,
+            session_count: state.sessions.lock().await.len(),
+            auth_enabled: state.config.auth_token.is_some(),
+            active_session_transactions,
+        },
+    }))
+}
+
+async fn debug_catalog(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<DebugResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/debug/catalog")?;
+
+    let db = state.db.lock().await;
+    let data = db.debug_catalog_json().map_err(|error| {
+        warn!(request_id, route = "/debug/catalog", error = %error, "request failed");
+        error_response(request_id, error.to_string())
+    })?;
+
+    info!(request_id, route = "/debug/catalog", "request completed");
+    Ok(Json(DebugResponse {
+        ok: true,
+        request_id,
+        data,
+    }))
+}
+
+async fn debug_storage(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<DebugResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/debug/storage")?;
+
+    let db = state.db.lock().await;
+    let data = db.debug_storage_json().map_err(|error| {
+        warn!(request_id, route = "/debug/storage", error = %error, "request failed");
+        error_response(request_id, error.to_string())
+    })?;
+
+    info!(request_id, route = "/debug/storage", "request completed");
+    Ok(Json(DebugResponse {
+        ok: true,
+        request_id,
+        data,
+    }))
+}
+
+async fn checkpoint(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<CheckpointResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/checkpoint")?;
+
+    let db = state.db.lock().await;
+    db.checkpoint().map_err(|error| {
+        warn!(request_id, route = "/checkpoint", error = %error, "checkpoint failed");
+        error_response(request_id, error.to_string())
+    })?;
+
+    info!(request_id, route = "/checkpoint", "request completed");
+    Ok(Json(CheckpointResponse {
+        ok: true,
+        request_id,
+        message: "checkpoint completed".to_string(),
     }))
 }
 
@@ -483,6 +603,10 @@ fn build_app(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/version", get(version))
         .route("/config", get(config_view))
+        .route("/metrics", get(metrics))
+        .route("/debug/catalog", get(debug_catalog))
+        .route("/debug/storage", get(debug_storage))
+        .route("/checkpoint", post(checkpoint))
         .route("/execute", post(execute))
         .route("/batch", post(batch))
         .route("/session", post(create_session))
@@ -1090,5 +1214,101 @@ mod tests {
         assert_eq!(json["config"]["tls_terminated"], true);
         assert_eq!(json["config"]["db_path"], db_path.display().to_string());
         assert!(json["config"].get("auth_token").is_none());
+    }
+
+    #[tokio::test]
+    async fn metrics_endpoint_reports_basic_server_state() {
+        let app = test_app().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert!(json["metrics"]["request_count_issued"].as_u64().is_some());
+        assert_eq!(json["metrics"]["session_count"], 0);
+        assert_eq!(json["metrics"]["auth_enabled"], false);
+    }
+
+    #[tokio::test]
+    async fn debug_catalog_requires_auth_when_configured() {
+        let db_path = std::env::temp_dir().join("skepa-db-server-debug-catalog-test");
+        let config = ServerConfig {
+            db_path: db_path.clone(),
+            addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
+            auth_token: Some("secret-token".to_string()),
+            tls_terminated: false,
+        };
+        let db = Database::open(DbConfig::new(db_path)).expect("test db should open");
+        let state = AppState {
+            db: Arc::new(Mutex::new(db)),
+            config,
+            next_request_id: Arc::new(AtomicU64::new(1)),
+            next_session_id: Arc::new(AtomicU64::new(1)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let app = build_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/debug/catalog")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn checkpoint_endpoint_runs_when_authorized() {
+        let db_path = std::env::temp_dir().join("skepa-db-server-checkpoint-test");
+        let config = ServerConfig {
+            db_path: db_path.clone(),
+            addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
+            auth_token: Some("secret-token".to_string()),
+            tls_terminated: false,
+        };
+        let db = Database::open(DbConfig::new(db_path)).expect("test db should open");
+        let state = AppState {
+            db: Arc::new(Mutex::new(db)),
+            config,
+            next_request_id: Arc::new(AtomicU64::new(1)),
+            next_session_id: Arc::new(AtomicU64::new(1)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let app = build_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/checkpoint")
+                    .header("authorization", "Bearer secret-token")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["message"], "checkpoint completed");
     }
 }

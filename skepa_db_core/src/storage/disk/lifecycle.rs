@@ -1,4 +1,34 @@
 impl DiskStorage {
+    pub fn debug_snapshot(&self, root: &Path) -> serde_json::Value {
+        let mut tables: Vec<serde_json::Value> = self
+            .tables
+            .iter()
+            .map(|(name, rows)| {
+                let row_id_count = self.row_ids.get(name).map(|ids| ids.len()).unwrap_or(0);
+                serde_json::json!({
+                    "table": name,
+                    "rows": rows.len(),
+                    "row_ids": row_id_count,
+                    "table_file": root.join("tables").join(format!("{name}.rows")).display().to_string(),
+                    "index_file": root.join("indexes").join(format!("{name}.indexes.json")).display().to_string()
+                })
+            })
+            .collect();
+        tables.sort_by(|a, b| a["table"].as_str().cmp(&b["table"].as_str()));
+
+        let wal_path = root.join("wal.log");
+        let wal_len = fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+
+        serde_json::json!({
+            "root": root.display().to_string(),
+            "tables": tables,
+            "wal": {
+                "path": wal_path.display().to_string(),
+                "bytes": wal_len
+            }
+        })
+    }
+
     pub fn new(root: impl Into<PathBuf>) -> Result<Self, String> {
         let root = root.into();
         initialize_layout(&root)?;

@@ -198,4 +198,39 @@ impl Database {
     pub fn has_active_transaction(&self) -> bool {
         self.current_tx.is_some()
     }
+
+    pub fn checkpoint(&self) -> DbResult<()> {
+        self.checkpoint_and_truncate_wal().map_err(DbError::from)
+    }
+
+    pub fn debug_catalog_json(&self) -> DbResult<serde_json::Value> {
+        let catalog_path = self.path.join("catalog.json");
+        if !catalog_path.exists() {
+            return Ok(serde_json::json!({
+                "path": catalog_path.display().to_string(),
+                "exists": false,
+                "tables": {}
+            }));
+        }
+
+        let raw = fs::read_to_string(&catalog_path).map_err(|e| DbError::from(e.to_string()))?;
+        let parsed = if raw.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str::<serde_json::Value>(&raw)
+                .map_err(|e| DbError::from(e.to_string()))?
+        };
+
+        Ok(serde_json::json!({
+            "path": catalog_path.display().to_string(),
+            "exists": true,
+            "catalog": parsed
+        }))
+    }
+
+    pub fn debug_storage_json(&self) -> DbResult<serde_json::Value> {
+        let mut snapshot = self.storage.debug_snapshot(&self.path);
+        snapshot["has_active_transaction"] = serde_json::json!(self.has_active_transaction());
+        Ok(snapshot)
+    }
 }
