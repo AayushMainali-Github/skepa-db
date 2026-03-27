@@ -1,26 +1,24 @@
-# skepa-db (v0.1.x)
+# skepa-db
 
-`skepa-db` is a lightweight SQL-style database you run locally from a CLI binary.
-
-This `0.1.x` release is focused on:
-- local disk-backed storage
-- transactions
-- constraints (including foreign keys)
-- WAL-based recovery
-
-It is not a network server database yet.
+`skepa-db` is a lightweight single-node SQL-style database with:
+- an embeddable core engine
+- a CLI for embedded and remote use
+- an HTTP server runtime
 
 ## What This Is
 
-- A local database CLI you run directly.
+- A disk-backed database engine.
+- A local database CLI you can run directly.
+- A small HTTP database server for trusted-network or self-hosted use.
 - Data is persisted on disk.
 - SQL-like syntax for `create`, `insert`, `select`, `update`, `delete`, constraints, indexes, and transactions.
 
 ## What This Is Not (Yet)
 
-- No server process (`localhost:5432` style) in `0.1.x`.
-- No users/roles/auth permissions yet.
-- No multi-client network protocol yet.
+- No built-in TLS termination.
+- No users/roles/permissions model beyond a shared bearer token.
+- No PostgreSQL/MySQL wire compatibility.
+- No distributed clustering or replication.
 
 ## Install
 
@@ -43,13 +41,14 @@ Requirements:
 Build:
 
 ```bash
-cargo build --release -p skepa_db_cli
+cargo build --release -p skepa_db_cli -p skepa_db_server
 ```
 
 Run:
 
 ```bash
 cargo run -p skepa_db_cli
+cargo run -p skepa_db_server -- --db-path ./mydb --addr 127.0.0.1:8080
 ```
 
 ## Start Using
@@ -72,6 +71,18 @@ commit;
 ```
 
 Use `help` in CLI to see command guidance.
+
+Remote CLI example:
+
+```bash
+cargo run -p skepa_db_cli -- execute "select * from users" --remote http://127.0.0.1:8080
+```
+
+Server with bearer auth:
+
+```bash
+cargo run -p skepa_db_server -- --config ./server.json --tls-terminated
+```
 
 ## Data Location
 
@@ -97,6 +108,25 @@ Implementation semantics and product behavior:
 - `docs/api.md`
 
 `Syntax.md` describes supported command forms. The `docs/` files describe the current engine, transaction, storage, and API semantics as implemented.
+
+## Server Operations
+
+Current HTTP server surface includes:
+
+- `GET /health`
+- `GET /version`
+- `GET /config`
+- `GET /metrics`
+- `GET /debug/catalog`
+- `GET /debug/storage`
+- `POST /checkpoint`
+- `POST /execute`
+- `POST /batch`
+- session endpoints for transaction-scoped execution
+
+When an auth token is configured, admin and query endpoints require `Authorization: Bearer <token>`. `GET /health` and `GET /version` stay public for liveness and version checks.
+
+TLS should currently be terminated by a reverse proxy or trusted ingress in front of `skepa_db_server`.
 
 ## Quality Gates
 

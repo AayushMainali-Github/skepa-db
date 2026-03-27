@@ -79,6 +79,30 @@ Recovery logs now emit:
 - malformed catalog fallback messages
 - WAL replay summary counts
 
+## Manual Admin Checkpoint
+
+The server admin surface exposes `POST /checkpoint`.
+
+That endpoint:
+
+1. checkpoints current table snapshots
+2. truncates the WAL
+3. returns success only if both complete
+
+This is an operational control, not a different durability mode.
+
+## Manual Admin Checkpoint
+
+The server admin surface now exposes `POST /checkpoint`.
+
+That endpoint:
+
+1. checkpoints current table snapshots
+2. truncates the WAL
+3. returns success only if both complete
+
+This is an operational control, not a different durability mode.
+
 ## Malformed Or Corrupt Inputs
 
 Current fallback behavior:
@@ -103,3 +127,5 @@ This is a solid local durability story, but not the same as a production-grade d
 - directory-level fsync semantics are not explicitly handled
 - checkpoint is still a multi-file process, not a manifest-switch architecture
 - corruption handling is pragmatic and local, not exhaustive across every possible partial-write pattern
+- TLS is expected to be terminated outside the database server process
+- TLS is expected to be terminated outside the database server process
