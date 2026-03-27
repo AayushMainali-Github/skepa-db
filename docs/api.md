@@ -151,17 +151,23 @@ Success envelope:
   "ok": true,
   "request_id": 1,
   "result": {
-    "Select": {
-      "schema": { "...": "..." },
-      "rows": [[1, "ram"]],
-      "stats": {
-        "rows_returned": 1,
-        "rows_affected": null
-      }
+    "type": "select",
+    "schema": { "...": "..." },
+    "rows": [[1, "ram"]],
+    "stats": {
+      "rows_returned": 1,
+      "rows_affected": null
     }
   }
 }
 ```
+
+Result types currently emitted by the HTTP API:
+
+- `select`
+- `mutation`
+- `schema_change`
+- `transaction`
 
 Error envelope:
 

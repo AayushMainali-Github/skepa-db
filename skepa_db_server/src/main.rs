@@ -8,6 +8,8 @@ use skepa_db_core::config::DbConfig;
 use skepa_db_core::parser::command::Command;
 use skepa_db_core::parser::parser::parse;
 use skepa_db_core::query_result::QueryResult;
+use skepa_db_core::storage::Schema;
+use skepa_db_core::types::Row;
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
@@ -161,14 +163,64 @@ enum ApiErrorCode {
 struct ExecuteResponse {
     ok: bool,
     request_id: u64,
-    result: QueryResult,
+    result: ApiQueryResult,
 }
 
 #[derive(Debug, Serialize)]
 struct BatchResponse {
     ok: bool,
     request_id: u64,
-    results: Vec<QueryResult>,
+    results: Vec<ApiQueryResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ApiQueryResult {
+    Select {
+        schema: Schema,
+        rows: Vec<Row>,
+        stats: skepa_db_core::execution_stats::ExecutionStats,
+    },
+    Mutation {
+        message: String,
+        rows_affected: usize,
+        stats: skepa_db_core::execution_stats::ExecutionStats,
+    },
+    SchemaChange {
+        message: String,
+        stats: skepa_db_core::execution_stats::ExecutionStats,
+    },
+    Transaction {
+        message: String,
+        stats: skepa_db_core::execution_stats::ExecutionStats,
+    },
+}
+
+impl From<QueryResult> for ApiQueryResult {
+    fn from(value: QueryResult) -> Self {
+        match value {
+            QueryResult::Select {
+                schema,
+                rows,
+                stats,
+            } => Self::Select {
+                schema,
+                rows,
+                stats,
+            },
+            QueryResult::Mutation {
+                message,
+                rows_affected,
+                stats,
+            } => Self::Mutation {
+                message,
+                rows_affected,
+                stats,
+            },
+            QueryResult::SchemaChange { message, stats } => Self::SchemaChange { message, stats },
+            QueryResult::Transaction { message, stats } => Self::Transaction { message, stats },
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -346,7 +398,7 @@ async fn execute(
     Ok(Json(ExecuteResponse {
         ok: true,
         request_id,
-        result,
+        result: result.into(),
     }))
 }
 
@@ -386,7 +438,7 @@ async fn batch(
                 warn!(request_id, route = "/batch", error = %error, "batch request failed");
                 map_db_error_response(request_id, error.to_string())
             })?;
-            results.push(result);
+            results.push(result.into());
         }
 
         Ok(results)
@@ -563,7 +615,7 @@ async fn execute_session(
     Ok(Json(ExecuteResponse {
         ok: true,
         request_id,
-        result,
+        result: result.into(),
     }))
 }
 
@@ -915,10 +967,8 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["ok"], true);
         assert!(json["request_id"].as_u64().is_some());
-        assert_eq!(
-            json["result"]["SchemaChange"]["message"],
-            "created table users"
-        );
+        assert_eq!(json["result"]["type"], "schema_change");
+        assert_eq!(json["result"]["message"], "created table users");
     }
 
     #[tokio::test]
@@ -952,12 +1002,12 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["ok"], true);
         assert_eq!(json["results"].as_array().expect("results array").len(), 3);
-        assert_eq!(
-            json["results"][0]["SchemaChange"]["message"],
-            "created table users"
-        );
-        assert_eq!(json["results"][1]["Mutation"]["rows_affected"], 1);
-        assert_eq!(json["results"][2]["Select"]["rows"][0][1], "ram");
+        assert_eq!(json["results"][0]["type"], "schema_change");
+        assert_eq!(json["results"][0]["message"], "created table users");
+        assert_eq!(json["results"][1]["type"], "mutation");
+        assert_eq!(json["results"][1]["rows_affected"], 1);
+        assert_eq!(json["results"][2]["type"], "select");
+        assert_eq!(json["results"][2]["rows"][0][1], "ram");
     }
 
     #[tokio::test]

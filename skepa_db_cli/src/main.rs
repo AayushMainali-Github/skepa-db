@@ -3,8 +3,11 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use skepa_db_core::Database;
 use skepa_db_core::config::DbConfig;
+use skepa_db_core::execution_stats::ExecutionStats;
 use skepa_db_core::parser::parser::parse;
 use skepa_db_core::query_result::QueryResult;
+use skepa_db_core::storage::Schema;
+use skepa_db_core::types::Row;
 use skepa_db_core::types::value::value_to_string;
 use std::env;
 use std::io::{self, Write};
@@ -32,7 +35,7 @@ struct ExecuteRequest {
 struct ExecuteResponse {
     ok: bool,
     request_id: u64,
-    result: QueryResult,
+    result: ApiQueryResult,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,7 +47,60 @@ struct ErrorResponse {
 
 #[derive(Debug, Deserialize)]
 struct ErrorBody {
+    code: String,
     message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ApiQueryResult {
+    Select {
+        schema: Schema,
+        rows: Vec<Row>,
+        stats: ExecutionStats,
+    },
+    Mutation {
+        message: String,
+        rows_affected: usize,
+        stats: ExecutionStats,
+    },
+    SchemaChange {
+        message: String,
+        stats: ExecutionStats,
+    },
+    Transaction {
+        message: String,
+        stats: ExecutionStats,
+    },
+}
+
+impl From<ApiQueryResult> for QueryResult {
+    fn from(value: ApiQueryResult) -> Self {
+        match value {
+            ApiQueryResult::Select {
+                schema,
+                rows,
+                stats,
+            } => Self::Select {
+                schema,
+                rows,
+                stats,
+            },
+            ApiQueryResult::Mutation {
+                message,
+                rows_affected,
+                stats,
+            } => Self::Mutation {
+                message,
+                rows_affected,
+                stats,
+            },
+            ApiQueryResult::SchemaChange { message, stats } => {
+                Self::SchemaChange { message, stats }
+            }
+            ApiQueryResult::Transaction { message, stats } => Self::Transaction { message, stats },
+        }
+    }
 }
 
 fn render_query_result(result: &QueryResult) -> String {
@@ -205,7 +261,7 @@ fn execute_remote(client: &Client, remote_url: &str, sql: &str) -> Result<QueryR
             .with_context(|| format!("failed to parse success response from {url}"))?;
         let _request_id = payload.request_id;
         let _ok = payload.ok;
-        Ok(payload.result)
+        Ok(payload.result.into())
     } else {
         let status = response.status();
         let payload: ErrorResponse = response
@@ -214,7 +270,8 @@ fn execute_remote(client: &Client, remote_url: &str, sql: &str) -> Result<QueryR
         let _request_id = payload.request_id;
         let _ok = payload.ok;
         bail!(
-            "remote request failed ({status}): {}",
+            "remote request failed ({status}, {}): {}",
+            payload.error.code,
             payload.error.message
         )
     }
@@ -410,7 +467,7 @@ mod tests {
     #[test]
     fn execute_remote_returns_query_result() {
         let (base_url, handle) = spawn_test_server(
-            r#"{"ok":true,"request_id":1,"result":{"SchemaChange":{"message":"created table users","stats":{"rows_returned":null,"rows_affected":null}}}}"#.to_string(),
+            r#"{"ok":true,"request_id":1,"result":{"type":"schema_change","message":"created table users","stats":{"rows_returned":null,"rows_affected":null}}}"#.to_string(),
             "HTTP/1.1 200 OK",
         );
         let client = Client::new();
@@ -429,13 +486,14 @@ mod tests {
     #[test]
     fn execute_remote_maps_http_errors() {
         let (base_url, handle) = spawn_test_server(
-            r#"{"ok":false,"request_id":1,"error":{"message":"synthetic remote error"}}"#
+            r#"{"ok":false,"request_id":1,"error":{"code":"EXECUTION_ERROR","message":"synthetic remote error"}}"#
                 .to_string(),
             "HTTP/1.1 400 Bad Request",
         );
         let client = Client::new();
 
         let error = execute_remote(&client, &base_url, "bad sql").expect_err("request should fail");
+        assert!(error.to_string().contains("EXECUTION_ERROR"));
         assert!(error.to_string().contains("synthetic remote error"));
 
         handle.join().expect("server thread should finish");
