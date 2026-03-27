@@ -1,5 +1,5 @@
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,16 @@ use tracing_subscriber::EnvFilter;
 struct ServerConfig {
     db_path: PathBuf,
     addr: SocketAddr,
+    auth_token: Option<String>,
+    tls_terminated: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ServerFileConfig {
+    db_path: Option<PathBuf>,
+    addr: Option<String>,
+    auth_token: Option<String>,
+    tls_terminated: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +41,21 @@ struct AppState {
     next_request_id: Arc<AtomicU64>,
     next_session_id: Arc<AtomicU64>,
     sessions: Arc<Mutex<HashMap<u64, Arc<Mutex<Database>>>>>,
+}
+
+#[derive(Debug, Serialize)]
+struct ConfigResponse {
+    ok: bool,
+    request_id: u64,
+    config: ConfigView,
+}
+
+#[derive(Debug, Serialize)]
+struct ConfigView {
+    db_path: String,
+    addr: String,
+    auth_enabled: bool,
+    tls_terminated: bool,
 }
 
 impl AppState {
@@ -128,11 +153,33 @@ async fn version(State(state): State<AppState>) -> Json<VersionResponse> {
     })
 }
 
+async fn config_view(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ConfigResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/config")?;
+
+    info!(request_id, route = "/config", "request completed");
+    Ok(Json(ConfigResponse {
+        ok: true,
+        request_id,
+        config: ConfigView {
+            db_path: state.config.db_path.display().to_string(),
+            addr: state.config.addr.to_string(),
+            auth_enabled: state.config.auth_token.is_some(),
+            tls_terminated: state.config.tls_terminated,
+        },
+    }))
+}
+
 async fn execute(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<ExecuteRequest>,
 ) -> Result<Json<ExecuteResponse>, (StatusCode, Json<ErrorResponse>)> {
     let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/execute")?;
     validate_global_sql(request_id, "/execute", &request.sql)?;
 
     let mut db = state.db.lock().await;
@@ -151,9 +198,11 @@ async fn execute(
 
 async fn batch(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<BatchRequest>,
 ) -> Result<Json<BatchResponse>, (StatusCode, Json<ErrorResponse>)> {
     let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/batch")?;
     if request.statements.is_empty() {
         warn!(request_id, route = "/batch", "rejected empty batch");
         return Err(error_response(request_id, "statements must not be empty"));
@@ -187,8 +236,10 @@ async fn batch(
 
 async fn create_session(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<SessionResponse>, (StatusCode, Json<ErrorResponse>)> {
     let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/session")?;
     let session_id = state.next_session_id();
     let session_db =
         Database::open(DbConfig::new(state.config.db_path.clone())).map_err(|error| {
@@ -217,9 +268,11 @@ async fn create_session(
 
 async fn delete_session(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(session_id): Path<u64>,
 ) -> Result<Json<SessionDeletedResponse>, (StatusCode, Json<ErrorResponse>)> {
     let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/session/:id")?;
     let session_db = state.sessions.lock().await.get(&session_id).cloned();
 
     let Some(session_db) = session_db else {
@@ -265,10 +318,12 @@ async fn delete_session(
 
 async fn execute_session(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(session_id): Path<u64>,
     Json(request): Json<ExecuteRequest>,
 ) -> Result<Json<ExecuteResponse>, (StatusCode, Json<ErrorResponse>)> {
     let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/session/:id/execute")?;
     if request.sql.trim().is_empty() {
         warn!(
             request_id,
@@ -368,10 +423,66 @@ fn error_response(
     )
 }
 
+fn unauthorized_response(
+    request_id: u64,
+    message: impl Into<String>,
+) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(ErrorResponse {
+            ok: false,
+            request_id,
+            error: ErrorBody {
+                message: message.into(),
+            },
+        }),
+    )
+}
+
+fn validate_auth(
+    state: &AppState,
+    headers: &HeaderMap,
+    request_id: u64,
+    route: &'static str,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let Some(expected) = state.config.auth_token.as_deref() else {
+        return Ok(());
+    };
+
+    let Some(header_value) = headers.get(axum::http::header::AUTHORIZATION) else {
+        warn!(request_id, route, "missing authorization header");
+        return Err(unauthorized_response(request_id, "missing bearer token"));
+    };
+
+    let Ok(header_value) = header_value.to_str() else {
+        warn!(request_id, route, "invalid authorization header");
+        return Err(unauthorized_response(
+            request_id,
+            "invalid authorization header",
+        ));
+    };
+
+    let Some(provided) = header_value.strip_prefix("Bearer ") else {
+        warn!(request_id, route, "authorization header was not bearer");
+        return Err(unauthorized_response(
+            request_id,
+            "authorization must use Bearer token",
+        ));
+    };
+
+    if provided != expected {
+        warn!(request_id, route, "invalid bearer token");
+        return Err(unauthorized_response(request_id, "invalid bearer token"));
+    }
+
+    Ok(())
+}
+
 fn build_app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/version", get(version))
+        .route("/config", get(config_view))
         .route("/execute", post(execute))
         .route("/batch", post(batch))
         .route("/session", post(create_session))
@@ -381,25 +492,75 @@ fn build_app(state: AppState) -> Router {
 }
 
 fn parse_server_config() -> Result<ServerConfig, Box<dyn std::error::Error>> {
-    let mut db_path = env::var("SKEPA_DB_PATH").unwrap_or_else(|_| "./mydb".to_string());
-    let mut addr = env::var("SKEPA_DB_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+    let mut config_path: Option<PathBuf> = env::var("SKEPA_DB_CONFIG").ok().map(PathBuf::from);
+
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg.as_str() == "--config" {
+            config_path = Some(PathBuf::from(
+                args.next().ok_or("missing value for --config")?,
+            ));
+        }
+    }
+
+    let file_config = if let Some(path) = config_path {
+        let raw = std::fs::read_to_string(&path)?;
+        serde_json::from_str::<ServerFileConfig>(&raw)?
+    } else {
+        ServerFileConfig::default()
+    };
+
+    let mut db_path = file_config
+        .db_path
+        .unwrap_or_else(|| PathBuf::from("./mydb"));
+    if let Ok(env_path) = env::var("SKEPA_DB_PATH") {
+        db_path = PathBuf::from(env_path);
+    }
+
+    let mut addr = file_config
+        .addr
+        .unwrap_or_else(|| "127.0.0.1:8080".to_string());
+    if let Ok(env_addr) = env::var("SKEPA_DB_ADDR") {
+        addr = env_addr;
+    }
+
+    let mut auth_token = file_config.auth_token;
+    if let Ok(env_token) = env::var("SKEPA_DB_AUTH_TOKEN") {
+        auth_token = Some(env_token);
+    }
+
+    let mut tls_terminated = file_config.tls_terminated.unwrap_or(false);
+    if let Ok(env_tls) = env::var("SKEPA_DB_TLS_TERMINATED") {
+        tls_terminated = matches!(env_tls.to_lowercase().as_str(), "1" | "true" | "yes");
+    }
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--db-path" => {
-                db_path = args.next().ok_or("missing value for --db-path")?;
+                db_path = args.next().ok_or("missing value for --db-path")?.into();
             }
             "--addr" => {
                 addr = args.next().ok_or("missing value for --addr")?;
+            }
+            "--auth-token" => {
+                auth_token = Some(args.next().ok_or("missing value for --auth-token")?);
+            }
+            "--tls-terminated" => {
+                tls_terminated = true;
+            }
+            "--config" => {
+                let _ = args.next().ok_or("missing value for --config")?;
             }
             _ => return Err(format!("unknown argument: {arg}").into()),
         }
     }
 
     Ok(ServerConfig {
-        db_path: PathBuf::from(db_path),
+        db_path,
         addr: addr.parse()?,
+        auth_token,
+        tls_terminated,
     })
 }
 
@@ -457,6 +618,8 @@ mod tests {
         let config = ServerConfig {
             db_path: db_path.clone(),
             addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
+            auth_token: None,
+            tls_terminated: false,
         };
         let db = Database::open(DbConfig::new(db_path)).expect("test db should open");
         let state = AppState {
@@ -813,5 +976,119 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["ok"], false);
         assert_eq!(json["error"]["message"], "session 999 was not found");
+    }
+
+    #[tokio::test]
+    async fn execute_requires_bearer_token_when_configured() {
+        let db_path = std::env::temp_dir().join("skepa-db-server-auth-test");
+        let config = ServerConfig {
+            db_path: db_path.clone(),
+            addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
+            auth_token: Some("secret-token".to_string()),
+            tls_terminated: false,
+        };
+        let db = Database::open(DbConfig::new(db_path)).expect("test db should open");
+        let state = AppState {
+            db: Arc::new(Mutex::new(db)),
+            config,
+            next_request_id: Arc::new(AtomicU64::new(1)),
+            next_session_id: Arc::new(AtomicU64::new(1)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let app = build_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"select * from users"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["error"]["message"], "missing bearer token");
+    }
+
+    #[tokio::test]
+    async fn health_stays_public_when_auth_is_configured() {
+        let db_path = std::env::temp_dir().join("skepa-db-server-auth-health-test");
+        let config = ServerConfig {
+            db_path: db_path.clone(),
+            addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
+            auth_token: Some("secret-token".to_string()),
+            tls_terminated: true,
+        };
+        let db = Database::open(DbConfig::new(db_path)).expect("test db should open");
+        let state = AppState {
+            db: Arc::new(Mutex::new(db)),
+            config,
+            next_request_id: Arc::new(AtomicU64::new(1)),
+            next_session_id: Arc::new(AtomicU64::new(1)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let app = build_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/health")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn config_endpoint_masks_auth_value_but_reports_auth_enabled() {
+        let db_path = std::env::temp_dir().join("skepa-db-server-config-test");
+        let config = ServerConfig {
+            db_path: db_path.clone(),
+            addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
+            auth_token: Some("secret-token".to_string()),
+            tls_terminated: true,
+        };
+        let db = Database::open(DbConfig::new(db_path.clone())).expect("test db should open");
+        let state = AppState {
+            db: Arc::new(Mutex::new(db)),
+            config,
+            next_request_id: Arc::new(AtomicU64::new(1)),
+            next_session_id: Arc::new(AtomicU64::new(1)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let app = build_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/config")
+                    .header("authorization", "Bearer secret-token")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["config"]["auth_enabled"], true);
+        assert_eq!(json["config"]["tls_terminated"], true);
+        assert_eq!(json["config"]["db_path"], db_path.display().to_string());
+        assert!(json["config"].get("auth_token").is_none());
     }
 }
