@@ -52,6 +52,34 @@ fn bench_core_workloads(c: &mut Criterion) {
                     .expect("insert should succeed");
             });
         });
+
+        group.bench_with_input(
+            BenchmarkId::new("transaction_begin_commit", row_count),
+            &row_count,
+            |b, &row_count| {
+                let mut db = setup_users_db(row_count);
+                b.iter(|| {
+                    db.execute("begin").expect("begin should succeed");
+                    db.execute("commit").expect("commit should succeed");
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("transaction_update_commit", row_count),
+            &row_count,
+            |b, &row_count| {
+                let mut db = setup_users_db(row_count);
+                let mut next_age = 5_000_i64;
+                b.iter(|| {
+                    db.execute("begin").expect("begin should succeed");
+                    let sql = format!("update users set age = {next_age} where id = 777");
+                    next_age += 1;
+                    db.execute(&sql).expect("update should succeed");
+                    db.execute("commit").expect("commit should succeed");
+                });
+            },
+        );
     }
 
     group.finish();
