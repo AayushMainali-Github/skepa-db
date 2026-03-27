@@ -142,6 +142,65 @@ Admin/debug endpoints are stateless but protected when auth is enabled.
 
 `idempotency_key` is optional. The server currently logs and echoes this semantic boundary for clients, but it does not yet deduplicate repeated writes automatically. Clients should treat it as a request identity hint for now.
 
+## Curl Examples
+
+Stateless query:
+
+```bash
+curl -X POST http://127.0.0.1:8080/execute \
+  -H "content-type: application/json" \
+  -d '{
+    "sql": "select * from users",
+    "timeout_ms": 250,
+    "idempotency_key": "req-123"
+  }'
+```
+
+Authorized stateless batch:
+
+```bash
+curl -X POST http://127.0.0.1:8080/batch \
+  -H "authorization: Bearer replace-me" \
+  -H "content-type: application/json" \
+  -d '{
+    "statements": [
+      "create table users (id int primary key, name text)",
+      "insert into users values (1, \"ram\")",
+      "select * from users"
+    ],
+    "timeout_ms": 500,
+    "idempotency_key": "batch-123"
+  }'
+```
+
+Session transaction flow:
+
+1. Create a session:
+
+```bash
+curl -X POST http://127.0.0.1:8080/session \
+  -H "authorization: Bearer replace-me"
+```
+
+2. Execute transaction commands through that session:
+
+```bash
+curl -X POST http://127.0.0.1:8080/session/1/execute \
+  -H "authorization: Bearer replace-me" \
+  -H "content-type: application/json" \
+  -d '{"sql":"begin"}'
+
+curl -X POST http://127.0.0.1:8080/session/1/execute \
+  -H "authorization: Bearer replace-me" \
+  -H "content-type: application/json" \
+  -d '{"sql":"insert into users values (1, \"ram\")"}'
+
+curl -X POST http://127.0.0.1:8080/session/1/execute \
+  -H "authorization: Bearer replace-me" \
+  -H "content-type: application/json" \
+  -d '{"sql":"commit"}'
+```
+
 ## Response Shapes
 
 Success envelope:
@@ -204,6 +263,14 @@ Current stable codes:
 - `EXECUTION_ERROR`
 
 The HTTP status is intentionally coarse right now. Application code should key off `error.code`, not only the status.
+
+## Integration Guidance
+
+- Treat `request_id` as a server-issued trace handle for logs and support, not as a client idempotency token.
+- For writes, prefer one statement per `/execute` request unless your application needs the partial progress semantics of `/batch`.
+- Use `/session/{id}/execute` for any transaction flow; `begin`, `commit`, and `rollback` are intentionally rejected on stateless endpoints.
+- If you set `timeout_ms`, the server may return `TIMEOUT` while the final write outcome is still uncertain. Check state before retrying mutations.
+- If auth is enabled, send `Authorization: Bearer <token>` on every protected request.
 
 ## Admin Endpoint Notes
 
