@@ -1,6 +1,6 @@
 [package]
 name = "skepa_db_server"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
@@ -11,4 +11,4 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tower = { version = "0.5", features = ["util"] }
-skepa_db_core = { path = "../skepa_db_core" }
+skepa_db_core = { path = "../skepa_db_core", version = "1.0.0" }
