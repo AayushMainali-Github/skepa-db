@@ -48,7 +48,7 @@ impl Database {
     pub fn open(config: DbConfig) -> DbResult<Self> {
         let path = config.path;
         let storage = Self::initialize_storage(&path)?;
-        let catalog = Self::load_catalog(&path);
+        let catalog = Self::load_catalog(&path)?;
 
         let mut db = Self {
             path,

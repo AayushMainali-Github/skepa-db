@@ -105,9 +105,8 @@ impl Database {
     }
 
     pub(super) fn reload_from_disk(&mut self) -> Result<(), String> {
-        let catalog_path = self.path.join("catalog.json");
         let mut storage = DiskStorage::new(self.path.clone())?;
-        let catalog = Catalog::load_from_path(&catalog_path).unwrap_or_else(|_| Catalog::new());
+        let catalog = Self::load_catalog(&self.path).map_err(|e| e.to_string())?;
         for (table, _) in catalog.snapshot_tables() {
             let schema = catalog
                 .schema(&table)

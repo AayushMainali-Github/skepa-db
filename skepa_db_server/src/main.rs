@@ -3042,7 +3042,7 @@ mod tests {
             rejected_json["error"]["message"]
                 .as_str()
                 .expect("error message should be string")
-                .contains("does not exist")
+                .contains("newer than supported version")
         );
 
         let import_response = app

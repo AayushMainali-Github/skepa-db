@@ -1,4 +1,5 @@
 use super::*;
+use skepa_db_core::config::DbConfig;
 
 #[test]
 fn bootstrap_malformed_row_count_errors() {
@@ -164,4 +165,27 @@ fn malformed_catalog_falls_back_to_empty_database_on_open() {
 
     let reopened = Catalog::load_from_path(&path.join("catalog.json")).unwrap();
     assert!(reopened.schema("users").is_ok());
+}
+
+#[test]
+fn newer_catalog_format_is_rejected_on_open() {
+    let path = temp_dir("future_catalog_open_reject");
+    std::fs::create_dir_all(path.join("tables")).unwrap();
+    std::fs::create_dir_all(path.join("indexes")).unwrap();
+    std::fs::write(
+        path.join("catalog.json"),
+        format!(
+            r#"{{
+  "format_version": {},
+  "tables": {{}},
+  "table_constraints": {{}}
+}}"#,
+            skepa_db_core::STORAGE_FORMAT_VERSION + 1
+        ),
+    )
+    .unwrap();
+    std::fs::write(path.join("wal.log"), "").unwrap();
+
+    let err = Database::open(DbConfig::new(path)).unwrap_err();
+    assert!(err.to_string().contains("newer than supported version"));
 }

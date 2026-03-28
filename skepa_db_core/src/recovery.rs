@@ -5,17 +5,25 @@ impl Database {
         DiskStorage::new(path.to_path_buf()).map_err(DbError::from)
     }
 
-    pub(super) fn load_catalog(path: &Path) -> Catalog {
+    fn should_fallback_empty_catalog(err: &str) -> bool {
+        err.contains("Malformed catalog JSON")
+    }
+
+    pub(super) fn load_catalog(path: &Path) -> DbResult<Catalog> {
         let catalog_path = path.join("catalog.json");
         match Catalog::load_from_path(&catalog_path) {
-            Ok(catalog) => catalog,
+            Ok(catalog) => Ok(catalog),
             Err(err) => {
-                eprintln!(
-                    "skepa-db: catalog load failed at '{}', starting with empty catalog: {}",
-                    catalog_path.display(),
-                    err
-                );
-                Catalog::new()
+                if Self::should_fallback_empty_catalog(&err) {
+                    eprintln!(
+                        "skepa-db: catalog load failed at '{}', starting with empty catalog: {}",
+                        catalog_path.display(),
+                        err
+                    );
+                    Ok(Catalog::new())
+                } else {
+                    Err(DbError::from(err))
+                }
             }
         }
     }
