@@ -1571,10 +1571,18 @@ fn parse_server_config() -> Result<ServerConfig, Box<dyn std::error::Error>> {
         return Err("default database must not be empty".into());
     }
 
+    if default_database.contains(['\\', '/', ':']) {
+        return Err("default database must be a single database name, not a path".into());
+    }
+
+    let parsed_addr: SocketAddr = addr
+        .parse()
+        .map_err(|_| format!("invalid --addr value '{addr}', expected host:port"))?;
+
     Ok(ServerConfig {
         data_dir,
         default_database,
-        addr: addr.parse()?,
+        addr: parsed_addr,
         auth_token,
         tls_terminated,
     })

@@ -115,6 +115,8 @@ Example server config file:
 
 On process shutdown, the server listens for `Ctrl+C` and attempts a best-effort checkpoint across the discovered database directories under `data_dir` before exiting.
 
+For full operator guidance, including recommended deployment topology and directory layout, see `docs/server-operations.md`.
+
 ## Stateless And Session Endpoints
 
 Stateless endpoints:
@@ -343,6 +345,8 @@ The HTTP status is intentionally coarse right now. Application code should key o
 - `GET /debug/catalog` returns the persisted catalog snapshot from disk
 - `GET /debug/storage` returns a storage snapshot including table counts and WAL file info
 - `POST /checkpoint` forces a checkpoint plus WAL truncation through the engine
+
+These endpoints are operator/admin surfaces, not general application-query routes.
 
 ## CLI Modes
 

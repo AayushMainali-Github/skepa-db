@@ -125,6 +125,7 @@ Compatibility and upgrade policy now live in:
 - `docs/compatibility.md`
 - `docs/upgrades.md`
 - `docs/release-process.md`
+- `docs/server-operations.md`
 
 ## Server Operations
 
@@ -150,6 +151,10 @@ The server starts with a metadata banner in logs and performs a best-effort chec
 For moving data between compatible `skepa-db` servers, use the HTTP database export/import endpoints. They package the named database directory contents as JSON for conservative backup-style transfer.
 
 TLS should currently be terminated by a reverse proxy or trusted ingress in front of `skepa_db_server`.
+
+For a full operator guide, including deployment topology, directory layout, checkpoint/shutdown guidance, and admin endpoint intent, see:
+
+- `docs/server-operations.md`
 
 ## Quality Gates
 
