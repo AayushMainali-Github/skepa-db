@@ -21,14 +21,17 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            bin_name: skepa_db_cli
-            artifact_name: skepa_db_cli-linux-x86_64
+            artifacts: |
+              skepa_db_cli:skepa_db_cli-linux-x86_64
+              skepa_db_server:skepa_db_server-linux-x86_64
           - os: windows-latest
-            bin_name: skepa_db_cli.exe
-            artifact_name: skepa_db_cli-windows-x86_64.exe
+            artifacts: |
+              skepa_db_cli.exe:skepa_db_cli-windows-x86_64.exe
+              skepa_db_server.exe:skepa_db_server-windows-x86_64.exe
           - os: macos-latest
-            bin_name: skepa_db_cli
-            artifact_name: skepa_db_cli-macos-aarch64
+            artifacts: |
+              skepa_db_cli:skepa_db_cli-macos-aarch64
+              skepa_db_server:skepa_db_server-macos-aarch64
 
     steps:
       - name: Checkout
@@ -40,27 +43,37 @@ jobs:
       - name: Cache cargo and target
         uses: Swatinem/rust-cache@v2
 
-      - name: Build CLI (release)
-        run: cargo build --release -p skepa_db_cli
+      - name: Build CLI and server (release)
+        run: cargo build --release -p skepa_db_cli -p skepa_db_server
 
-      - name: Prepare artifact (Linux/macOS)
+      - name: Prepare artifacts (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          cp "target/release/${{ matrix.bin_name }}" "${{ matrix.artifact_name }}"
-          chmod +x "${{ matrix.artifact_name }}"
+          while IFS=: read -r src dest; do
+            cp "target/release/${src}" "${dest}"
+            chmod +x "${dest}"
+          done <<< "${{ matrix.artifacts }}"
 
-      - name: Prepare artifact (Windows)
+      - name: Prepare artifacts (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Copy-Item "target/release/${{ matrix.bin_name }}" "${{ matrix.artifact_name }}"
+          foreach ($line in @"
+${{ matrix.artifacts }}
+"@ -split "`n") {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            $parts = $line.Trim().Split(":")
+            Copy-Item "target/release/$($parts[0])" "$($parts[1])"
+          }
 
-      - name: Upload workflow artifact
+      - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}
+          name: release-${{ matrix.os }}
+          path: |
+            skepa_db_cli-*
+            skepa_db_server-*
           if-no-files-found: error
 
   release:
@@ -82,3 +95,6 @@ jobs:
             release-assets/**/skepa_db_cli-linux-x86_64
             release-assets/**/skepa_db_cli-windows-x86_64.exe
             release-assets/**/skepa_db_cli-macos-aarch64
+            release-assets/**/skepa_db_server-linux-x86_64
+            release-assets/**/skepa_db_server-windows-x86_64.exe
+            release-assets/**/skepa_db_server-macos-aarch64

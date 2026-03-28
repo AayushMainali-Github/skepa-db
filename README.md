@@ -117,6 +117,7 @@ Compatibility and upgrade policy now live in:
 
 - `docs/compatibility.md`
 - `docs/upgrades.md`
+- `docs/release-process.md`
 
 ## Server Operations
 
