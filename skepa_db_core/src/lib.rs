@@ -45,6 +45,7 @@ pub struct Database {
 }
 
 impl Database {
+    /// Canonical stable engine constructor for the public API.
     pub fn open(config: DbConfig) -> DbResult<Self> {
         let path = config.path;
         let storage = Self::initialize_storage(&path)?;
@@ -63,20 +64,32 @@ impl Database {
         Ok(db)
     }
 
+    /// Convenience wrapper around [`Database::open`] for path-only callers.
     pub fn try_open(path: impl Into<PathBuf>) -> DbResult<Self> {
         Self::open(DbConfig::new(path))
     }
 
+    #[deprecated(
+        since = "0.1.0",
+        note = "use Database::open(DbConfig::new(path)) for the stable public API"
+    )]
+    #[doc(hidden)]
     pub fn open_legacy(path: impl Into<PathBuf>) -> Self {
         Self::try_open(path).expect("Failed to open database")
     }
 
+    #[deprecated(
+        since = "0.1.0",
+        note = "use Database::execute(...) and render QueryResult outside the core engine"
+    )]
+    #[doc(hidden)]
     pub fn execute_legacy(&mut self, input: &str) -> Result<String, String> {
         self.execute(input)
             .map(|result| legacy_render::render_query_result(&result))
             .map_err(|err| err.to_string())
     }
 
+    /// Canonical stable engine execution entry point for the public API.
     pub fn execute(&mut self, input: &str) -> DbResult<QueryResult> {
         let cmd = parser::parser::parse(input).map_err(DbError::from)?;
         if matches!(cmd, Command::Begin) {

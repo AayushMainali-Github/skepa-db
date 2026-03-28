@@ -113,6 +113,13 @@ Implementation semantics and product behavior:
 
 `Syntax.md` describes supported command forms. The `docs/` files describe the current engine, transaction, storage, and API semantics as implemented.
 
+For embedded library use, the intended stable core boundary is:
+
+- `Database::open(DbConfig)`
+- `Database::execute(&str) -> QueryResult`
+
+Legacy string-rendering helpers still exist only as compatibility/testing shims and should not be treated as the primary API surface.
+
 Compatibility and upgrade policy now live in:
 
 - `docs/compatibility.md`

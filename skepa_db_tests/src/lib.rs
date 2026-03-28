@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(deprecated))]
+
 #[cfg(test)]
 mod engine_test;
 #[cfg(test)]

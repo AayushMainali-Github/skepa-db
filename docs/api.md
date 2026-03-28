@@ -18,6 +18,13 @@ Canonical engine entry points:
 - `Database::open(config)`
 - `Database::execute(sql)`
 
+Legacy compatibility helpers still exist for internal/tests:
+
+- `Database::open_legacy(path)`
+- `Database::execute_legacy(sql)`
+
+Those helpers are not part of the intended stable `v1` engine boundary. New callers should treat `DbConfig + Database::open` and typed `QueryResult` as the public contract.
+
 `QueryResult` variants:
 
 - `Select`
