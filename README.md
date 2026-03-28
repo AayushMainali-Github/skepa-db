@@ -124,11 +124,15 @@ Current HTTP server surface includes:
 - `POST /checkpoint`
 - `POST /execute`
 - `POST /batch`
+- named database lifecycle/execute endpoints
+- named database import/export endpoints
 - session endpoints for transaction-scoped execution
 
 When an auth token is configured, admin and query endpoints require `Authorization: Bearer <token>`. `GET /health` and `GET /version` stay public for liveness and version checks.
 
 The server starts with a metadata banner in logs and performs a best-effort checkpoint across discovered databases when shutting down on `Ctrl+C`.
+
+For moving data between compatible `skepa-db` servers, use the HTTP database export/import endpoints. They package the named database directory contents as JSON for conservative backup-style transfer.
 
 TLS should currently be terminated by a reverse proxy or trusted ingress in front of `skepa_db_server`.
 

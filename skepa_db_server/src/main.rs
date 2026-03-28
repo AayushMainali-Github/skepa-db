@@ -136,6 +136,39 @@ struct DatabaseDeletedResponse {
     database: DatabaseInfo,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExportedFile {
+    path: String,
+    content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DatabaseExport {
+    database: String,
+    files: Vec<ExportedFile>,
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseExportResponse {
+    ok: bool,
+    request_id: u64,
+    export: DatabaseExport,
+}
+
+#[derive(Debug, Deserialize)]
+struct DatabaseImportRequest {
+    export: DatabaseExport,
+    overwrite: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseImportResponse {
+    ok: bool,
+    request_id: u64,
+    database: DatabaseInfo,
+    imported_files: usize,
+}
+
 impl AppState {
     fn next_request_id(&self) -> u64 {
         self.next_request_id.fetch_add(1, Ordering::Relaxed)
@@ -458,6 +491,131 @@ async fn delete_database(
             path: path.display().to_string(),
             is_default: false,
             name: database,
+        },
+    }))
+}
+
+async fn export_database(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(database): Path<String>,
+) -> Result<Json<DatabaseExportResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/databases/:name/export")?;
+    let database = validate_database_name(request_id, &database)?;
+    let path = state.database_path(&database);
+
+    if !path.exists() {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::InvalidRequest,
+            format!("database '{database}' does not exist"),
+        ));
+    }
+
+    let export = build_database_export(&database, &path).map_err(|error| {
+        warn!(
+            request_id,
+            route = "/databases/:name/export",
+            database,
+            error = %error,
+            "failed to export database"
+        );
+        map_db_error_response(request_id, error)
+    })?;
+
+    info!(
+        request_id,
+        route = "/databases/:name/export",
+        database,
+        file_count = export.files.len(),
+        "database exported"
+    );
+    Ok(Json(DatabaseExportResponse {
+        ok: true,
+        request_id,
+        export,
+    }))
+}
+
+async fn import_database(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(database): Path<String>,
+    Json(request): Json<DatabaseImportRequest>,
+) -> Result<Json<DatabaseImportResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/databases/:name/import")?;
+    let database = validate_database_name(request_id, &database)?;
+    let target_path = state.database_path(&database);
+    let overwrite = request.overwrite.unwrap_or(false);
+
+    if request.export.files.is_empty() {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::InvalidRequest,
+            "export package must include at least one file",
+        ));
+    }
+
+    if target_path.exists() && !overwrite {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::DatabaseAlreadyExists,
+            format!("database '{database}' already exists"),
+        ));
+    }
+
+    if target_path.exists() {
+        fs::remove_dir_all(&target_path).map_err(|error| {
+            warn!(
+                request_id,
+                route = "/databases/:name/import",
+                database,
+                error = %error,
+                "failed to replace existing database directory"
+            );
+            map_db_error_response(request_id, error.to_string())
+        })?;
+    }
+
+    write_database_export(&target_path, &request.export).map_err(|error| {
+        warn!(
+            request_id,
+            route = "/databases/:name/import",
+            database,
+            error = %error,
+            "failed to import database files"
+        );
+        map_db_error_response(request_id, error)
+    })?;
+
+    Database::open(DbConfig::new(target_path.clone())).map_err(|error| {
+        warn!(
+            request_id,
+            route = "/databases/:name/import",
+            database,
+            error = %error,
+            "imported database failed to open"
+        );
+        map_db_error_response(request_id, error.to_string())
+    })?;
+
+    info!(
+        request_id,
+        route = "/databases/:name/import",
+        database,
+        file_count = request.export.files.len(),
+        "database imported"
+    );
+    Ok(Json(DatabaseImportResponse {
+        ok: true,
+        request_id,
+        imported_files: request.export.files.len(),
+        database: DatabaseInfo {
+            name: database.clone(),
+            path: target_path.display().to_string(),
+            is_default: database == state.default_database_name(),
         },
     }))
 }
@@ -1178,6 +1336,8 @@ fn build_app(state: AppState) -> Router {
         .route("/databases", get(list_databases).post(create_database))
         .route("/databases/{name}", delete(delete_database))
         .route("/databases/{name}/execute", post(execute_database))
+        .route("/databases/{name}/export", get(export_database))
+        .route("/databases/{name}/import", post(import_database))
         .route("/databases/{name}/session", post(create_database_session))
         .route(
             "/databases/{name}/session/{id}",
@@ -1197,6 +1357,67 @@ fn build_app(state: AppState) -> Router {
         .route("/session/{id}", delete(delete_session))
         .route("/session/{id}/execute", post(execute_session))
         .with_state(state)
+}
+
+fn collect_exported_files(
+    root: &std::path::Path,
+    current: &std::path::Path,
+    files: &mut Vec<ExportedFile>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(current).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        if file_type.is_dir() {
+            collect_exported_files(root, &path, files)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        files.push(ExportedFile {
+            path: relative,
+            content,
+        });
+    }
+    Ok(())
+}
+
+fn build_database_export(database: &str, path: &std::path::Path) -> Result<DatabaseExport, String> {
+    let mut files = Vec::new();
+    collect_exported_files(path, path, &mut files)?;
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(DatabaseExport {
+        database: database.to_string(),
+        files,
+    })
+}
+
+fn write_database_export(path: &std::path::Path, export: &DatabaseExport) -> Result<(), String> {
+    fs::create_dir_all(path).map_err(|error| error.to_string())?;
+    for file in &export.files {
+        if file.path.is_empty()
+            || file.path.contains("..")
+            || file.path.starts_with('/')
+            || file.path.starts_with('\\')
+        {
+            return Err(format!("invalid export file path '{}'", file.path));
+        }
+
+        let target = path.join(&file.path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::write(&target, &file.content).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn discover_database_names(state: &AppState) -> Result<Vec<String>, String> {
@@ -2522,6 +2743,184 @@ mod tests {
             .expect("body should read");
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["error"]["code"], "DATABASE_DELETE_DENIED");
+    }
+
+    #[tokio::test]
+    async fn export_database_returns_named_database_files() {
+        let app = test_app().await;
+
+        let create_database_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"analytics"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_database_response.status(), StatusCode::OK);
+
+        let create_table_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"create table users (id int primary key, name text)"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_table_response.status(), StatusCode::OK);
+
+        let insert_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"insert into users values (1, \"ram\")"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(insert_response.status(), StatusCode::OK);
+
+        let export_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/databases/analytics/export")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(export_response.status(), StatusCode::OK);
+        let body = to_bytes(export_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["export"]["database"], "analytics");
+        let files = json["export"]["files"].as_array().expect("files array");
+        assert!(files.iter().any(|file| file["path"] == "catalog.json"));
+        assert!(files.iter().any(|file| file["path"] == "tables/users.rows"));
+    }
+
+    #[tokio::test]
+    async fn import_database_restores_exported_named_database() {
+        let app = test_app().await;
+
+        let create_database_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"analytics"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_database_response.status(), StatusCode::OK);
+
+        let create_table_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"create table users (id int primary key, name text)"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_table_response.status(), StatusCode::OK);
+
+        let insert_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"insert into users values (1, \"ram\")"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(insert_response.status(), StatusCode::OK);
+
+        let export_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/databases/analytics/export")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(export_response.status(), StatusCode::OK);
+        let body = to_bytes(export_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let export_json: Value = serde_json::from_slice(&body).expect("json body should parse");
+
+        let import_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/archive/import")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "export": export_json["export"],
+                            "overwrite": false
+                        })
+                        .to_string(),
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(import_response.status(), StatusCode::OK);
+
+        let select_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/archive/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"select * from users"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(select_response.status(), StatusCode::OK);
+        let body = to_bytes(select_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["result"]["rows"][0][1], "ram");
     }
 
     #[tokio::test]

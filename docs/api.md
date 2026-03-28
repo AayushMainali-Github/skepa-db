@@ -53,6 +53,13 @@ Initial endpoints:
 - `POST /session`
 - `DELETE /session/{id}`
 - `POST /session/{id}/execute`
+- `GET /databases`
+- `POST /databases`
+- `DELETE /databases/{name}`
+- `POST /databases/{name}/execute`
+- `GET /databases/{name}/export`
+- `POST /databases/{name}/import`
+- database-scoped session endpoints
 
 ## Auth And Exposure
 
@@ -117,10 +124,36 @@ Session endpoints:
 - `/session`
 - `/session/{id}`
 - `/session/{id}/execute`
+- `/databases/{name}/session`
+- `/databases/{name}/session/{id}`
+- `/databases/{name}/session/{id}/execute`
 
 Transaction commands are rejected on stateless endpoints and must use session execution.
 
 Admin/debug endpoints are stateless but protected when auth is enabled.
+
+## Import And Export
+
+`GET /databases/{name}/export` returns a portable JSON package of the named database directory contents.
+
+`POST /databases/{name}/import`
+
+```json
+{
+  "export": {
+    "database": "analytics",
+    "files": [
+      {
+        "path": "catalog.json",
+        "content": "{...}"
+      }
+    ]
+  },
+  "overwrite": false
+}
+```
+
+Current import/export is a conservative operational workflow, not a schema migration system. It is intended for backup-style moves between compatible `skepa-db` instances.
 
 ## Request Shapes
 
