@@ -20,6 +20,8 @@ impl Default for Catalog {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CatalogFile {
+    #[serde(default = "default_catalog_format_version")]
+    format_version: u32,
     tables: HashMap<String, Vec<ColumnFile>>,
     #[serde(default)]
     table_constraints: HashMap<String, TableConstraintFile>,
@@ -66,6 +68,10 @@ fn default_on_delete() -> String {
 
 fn default_on_update() -> String {
     "restrict".to_string()
+}
+
+fn default_catalog_format_version() -> u32 {
+    crate::STORAGE_FORMAT_VERSION
 }
 
 include!("catalog/core.inc.rs");

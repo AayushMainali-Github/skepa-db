@@ -23,6 +23,8 @@ use tokio::time::timeout;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
+const SERVER_API_VERSION: &str = "v1";
+
 #[derive(Debug, Clone)]
 struct ServerConfig {
     data_dir: PathBuf,
@@ -69,6 +71,8 @@ struct ConfigView {
     db_path: String,
     data_dir: String,
     default_database: String,
+    api_version: &'static str,
+    storage_format_version: u32,
     addr: String,
     auth_enabled: bool,
     tls_terminated: bool,
@@ -203,6 +207,8 @@ struct VersionResponse {
     ok: bool,
     request_id: u64,
     server: &'static str,
+    api_version: &'static str,
+    storage_format_version: u32,
     version: &'static str,
 }
 
@@ -353,6 +359,8 @@ async fn version(State(state): State<AppState>) -> Json<VersionResponse> {
         ok: true,
         request_id,
         server: "skepa_db_server",
+        api_version: SERVER_API_VERSION,
+        storage_format_version: skepa_db_core::STORAGE_FORMAT_VERSION,
         version: env!("CARGO_PKG_VERSION"),
     })
 }
@@ -638,6 +646,8 @@ async fn config_view(
                 .to_string(),
             data_dir: state.data_dir().display().to_string(),
             default_database: state.default_database_name(),
+            api_version: SERVER_API_VERSION,
+            storage_format_version: skepa_db_core::STORAGE_FORMAT_VERSION,
             addr: state.config.addr.to_string(),
             auth_enabled: state.config.auth_token.is_some(),
             tls_terminated: state.config.tls_terminated,
@@ -1593,6 +1603,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(
         server = "skepa_db_server",
         version = env!("CARGO_PKG_VERSION"),
+        api_version = SERVER_API_VERSION,
+        storage_format_version = skepa_db_core::STORAGE_FORMAT_VERSION,
         addr = %state.config.addr,
         data_dir = %state.config.data_dir.display(),
         default_database = %state.config.default_database,
@@ -1710,6 +1722,8 @@ mod tests {
             .expect("body should read");
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["server"], "skepa_db_server");
+        assert_eq!(json["api_version"], "v1");
+        assert_eq!(json["storage_format_version"], 1);
         assert!(json["version"].as_str().is_some());
     }
 
@@ -2489,6 +2503,8 @@ mod tests {
             json["config"]["default_database"],
             "skepa-db-server-config-test"
         );
+        assert_eq!(json["config"]["api_version"], "v1");
+        assert_eq!(json["config"]["storage_format_version"], 1);
         assert!(json["config"].get("auth_token").is_none());
     }
 

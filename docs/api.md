@@ -90,6 +90,7 @@ When `auth_token` is configured:
 - missing or invalid tokens return `401 Unauthorized`
 - `GET /health` and `GET /version` remain public
 - `GET /version` returns server name and package version metadata
+- `GET /version` also returns `api_version` and `storage_format_version`
 
 Example server config file:
 
@@ -261,6 +262,19 @@ Success envelope:
       "rows_affected": null
     }
   }
+}
+```
+
+`GET /version` response shape:
+
+```json
+{
+  "ok": true,
+  "request_id": 1,
+  "server": "skepa_db_server",
+  "api_version": "v1",
+  "storage_format_version": 1,
+  "version": "0.1.0"
 }
 ```
 

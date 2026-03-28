@@ -169,3 +169,33 @@ fn catalog_save_replaces_file_without_temp_artifacts() {
         .collect::<Vec<_>>();
     assert_eq!(entries, vec!["catalog.json".to_string()]);
 }
+
+#[test]
+fn catalog_save_includes_storage_format_version() {
+    let mut catalog = Catalog::new();
+    catalog
+        .create_table(
+            "users".to_string(),
+            vec![ColumnDef {
+                name: "id".to_string(),
+                dtype: DataType::Int,
+                primary_key: true,
+                unique: false,
+                not_null: true,
+            }],
+            vec![],
+        )
+        .unwrap();
+
+    let path = temp_dir("catalog_format_version");
+    std::fs::create_dir_all(&path).unwrap();
+    let catalog_path = path.join("catalog.json");
+    catalog.save_to_path(&catalog_path).unwrap();
+
+    let raw = std::fs::read_to_string(&catalog_path).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        json["format_version"],
+        serde_json::json!(skepa_db_core::STORAGE_FORMAT_VERSION)
+    );
+}

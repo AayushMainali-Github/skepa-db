@@ -107,9 +107,16 @@ Implementation semantics and product behavior:
 - `docs/transactions.md`
 - `docs/storage.md`
 - `docs/api.md`
+- `docs/compatibility.md`
+- `docs/upgrades.md`
 - `docs/performance.md`
 
 `Syntax.md` describes supported command forms. The `docs/` files describe the current engine, transaction, storage, and API semantics as implemented.
+
+Compatibility and upgrade policy now live in:
+
+- `docs/compatibility.md`
+- `docs/upgrades.md`
 
 ## Server Operations
 

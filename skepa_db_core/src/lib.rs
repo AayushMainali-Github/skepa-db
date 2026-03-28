@@ -23,6 +23,8 @@ use parser::command::Command;
 use query_result::QueryResult;
 use storage::{Catalog, DiskStorage};
 
+pub const STORAGE_FORMAT_VERSION: u32 = 1;
+
 #[derive(Debug, Clone)]
 struct TxState {
     txid: u64,
@@ -203,10 +205,15 @@ impl Database {
         self.checkpoint_and_truncate_wal().map_err(DbError::from)
     }
 
+    pub fn storage_format_version(&self) -> u32 {
+        STORAGE_FORMAT_VERSION
+    }
+
     pub fn debug_catalog_json(&self) -> DbResult<serde_json::Value> {
         let catalog_path = self.path.join("catalog.json");
         if !catalog_path.exists() {
             return Ok(serde_json::json!({
+                "storage_format_version": self.storage_format_version(),
                 "path": catalog_path.display().to_string(),
                 "exists": false,
                 "tables": {}
@@ -222,6 +229,7 @@ impl Database {
         };
 
         Ok(serde_json::json!({
+            "storage_format_version": self.storage_format_version(),
             "path": catalog_path.display().to_string(),
             "exists": true,
             "catalog": parsed

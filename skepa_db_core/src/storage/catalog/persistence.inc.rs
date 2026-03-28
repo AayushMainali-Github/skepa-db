@@ -63,8 +63,12 @@ impl Catalog {
             );
         }
 
-        let payload = serde_json::to_string_pretty(&CatalogFile { tables, table_constraints })
-            .map_err(|e| format!("Failed to serialize catalog as JSON: {e}"))?;
+        let payload = serde_json::to_string_pretty(&CatalogFile {
+            format_version: crate::STORAGE_FORMAT_VERSION,
+            tables,
+            table_constraints,
+        })
+        .map_err(|e| format!("Failed to serialize catalog as JSON: {e}"))?;
         crate::storage::persistence::write_file_atomic(path, payload.as_bytes())
             .map_err(|e| format!("Failed to write catalog file: {e}"))
     }
@@ -83,9 +87,16 @@ impl Catalog {
         let file: CatalogFile = serde_json::from_str(&content)
             .map_err(|e| format!("Malformed catalog JSON: {e}"))?;
         let CatalogFile {
+            format_version,
             tables: file_tables,
             table_constraints: file_constraints,
         } = file;
+        if format_version > crate::STORAGE_FORMAT_VERSION {
+            return Err(format!(
+                "Catalog format version {format_version} is newer than supported version {}",
+                crate::STORAGE_FORMAT_VERSION
+            ));
+        }
         let mut tables: HashMap<String, Schema> = HashMap::new();
         for (table, cols) in file_tables {
             let mut columns: Vec<Column> = Vec::new();
