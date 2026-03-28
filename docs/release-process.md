@@ -29,6 +29,7 @@ Before tagging a release:
 3. State whether either value changed.
 4. State whether direct upgrade is expected to work.
 5. State whether import/export is recommended instead.
+6. Link to `docs/upgrades.md` if operators need a concrete procedure.
 
 ## Current Policy
 

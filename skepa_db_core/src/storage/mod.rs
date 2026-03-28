@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod disk;
 pub mod engine;
+pub mod migrations;
 pub mod persistence;
 pub mod schema;
 

@@ -91,12 +91,7 @@ impl Catalog {
             tables: file_tables,
             table_constraints: file_constraints,
         } = file;
-        if format_version > crate::STORAGE_FORMAT_VERSION {
-            return Err(format!(
-                "Catalog format version {format_version} is newer than supported version {}",
-                crate::STORAGE_FORMAT_VERSION
-            ));
-        }
+        crate::storage::migrations::plan_catalog_migration(format_version)?;
         let mut tables: HashMap<String, Schema> = HashMap::new();
         for (table, cols) in file_tables {
             let mut columns: Vec<Column> = Vec::new();
