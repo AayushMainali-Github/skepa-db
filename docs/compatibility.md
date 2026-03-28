@@ -72,6 +72,7 @@ Within `v1`, the following are the storage compatibility promises:
 - a supported older catalog format may load
 - a newer unsupported catalog format is rejected explicitly
 - import/export remains the conservative fallback when direct open compatibility is not guaranteed
+- export/import should be treated as the operator-facing recovery path after a storage-format compatibility boundary blocks direct open
 
 ## Upgrade Compatibility
 

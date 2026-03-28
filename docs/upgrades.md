@@ -23,6 +23,7 @@ Operators should expect:
 - newer unsupported storage metadata is rejected explicitly on open
 - unchanged storage format should continue to open directly
 - import/export is the conservative fallback if compatibility is uncertain
+- if direct open is blocked by a storage-format boundary, import/export is the supported recovery path
 
 ## When Storage Format Changes
 

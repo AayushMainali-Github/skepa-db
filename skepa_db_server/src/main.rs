@@ -2940,6 +2940,151 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn import_export_is_fallback_when_original_database_format_becomes_unsupported() {
+        let state = test_state().await;
+        let analytics_path = state.database_path("analytics");
+        let app = build_app(state.clone());
+
+        let create_database_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"analytics"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_database_response.status(), StatusCode::OK);
+
+        let create_table_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"create table users (id int primary key, name text)"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_table_response.status(), StatusCode::OK);
+
+        let insert_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"insert into users values (1, \"ram\")"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(insert_response.status(), StatusCode::OK);
+
+        let export_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/databases/analytics/export")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(export_response.status(), StatusCode::OK);
+        let body = to_bytes(export_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let export_json: Value = serde_json::from_slice(&body).expect("json body should parse");
+
+        let catalog_path = analytics_path.join("catalog.json");
+        let mut catalog_json: Value = serde_json::from_str(
+            &std::fs::read_to_string(&catalog_path).expect("catalog should read"),
+        )
+        .expect("catalog json should parse");
+        catalog_json["format_version"] = json!(skepa_db_core::STORAGE_FORMAT_VERSION + 1);
+        std::fs::write(
+            &catalog_path,
+            serde_json::to_string_pretty(&catalog_json).expect("catalog should serialize"),
+        )
+        .expect("catalog should write");
+
+        let rejected_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"select * from users"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(rejected_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(rejected_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let rejected_json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(rejected_json["error"]["code"], "EXECUTION_ERROR");
+        assert!(
+            rejected_json["error"]["message"]
+                .as_str()
+                .expect("error message should be string")
+                .contains("does not exist")
+        );
+
+        let import_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/archive/import")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "export": export_json["export"],
+                            "overwrite": false
+                        })
+                        .to_string(),
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(import_response.status(), StatusCode::OK);
+
+        let restored_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/archive/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"select * from users"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(restored_response.status(), StatusCode::OK);
+        let body = to_bytes(restored_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let restored_json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(restored_json["result"]["rows"][0][1], "ram");
+    }
+
+    #[tokio::test]
     async fn discover_database_names_includes_default_and_created_databases() {
         let state = test_state().await;
         Database::open(DbConfig::new(state.database_path("analytics")))
