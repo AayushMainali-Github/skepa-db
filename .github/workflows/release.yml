@@ -59,9 +59,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($line in @"
-${{ matrix.artifacts }}
-"@ -split "`n") {
+          $artifactLines = @(
+            '${{ matrix.artifacts }}' -split "`n"
+          )
+          foreach ($line in $artifactLines) {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             $parts = $line.Trim().Split(":")
             Copy-Item "target/release/$($parts[0])" "$($parts[1])"
