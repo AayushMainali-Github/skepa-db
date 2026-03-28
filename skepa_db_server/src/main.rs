@@ -376,10 +376,6 @@ async fn create_database(
         ));
     }
 
-    fs::create_dir_all(&path).map_err(|error| {
-        warn!(request_id, route = "/databases", database = %name, error = %error, "failed to create database directory");
-        map_db_error_response(request_id, error.to_string())
-    })?;
     Database::open(DbConfig::new(path.clone())).map_err(|error| {
         warn!(request_id, route = "/databases", database = %name, error = %error, "failed to initialize database");
         map_db_error_response(request_id, error.to_string())
@@ -536,6 +532,70 @@ async fn execute(
     .await?;
 
     info!(request_id, route = "/execute", "request completed");
+    Ok(Json(ExecuteResponse {
+        ok: true,
+        request_id,
+        result: result.into(),
+    }))
+}
+
+async fn execute_database(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(database): Path<String>,
+    Json(request): Json<ExecuteRequest>,
+) -> Result<Json<ExecuteResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/databases/:name/execute")?;
+    let database = validate_database_name(request_id, &database)?;
+    validate_global_sql(request_id, "/databases/:name/execute", &request.sql)?;
+
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        info!(
+            request_id,
+            route = "/databases/:name/execute",
+            database,
+            idempotency_key,
+            "received idempotency key"
+        );
+    }
+
+    let path = state.database_path(&database);
+    if !path.exists() {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::InvalidRequest,
+            format!("database '{database}' does not exist"),
+        ));
+    }
+
+    let result = execute_with_timeout(
+        request_id,
+        "/databases/:name/execute",
+        request.timeout_ms,
+        async {
+            let mut db = Database::open(DbConfig::new(path)).map_err(|error| {
+                warn!(
+                    request_id,
+                    route = "/databases/:name/execute",
+                    database,
+                    error = %error,
+                    "failed to open database"
+                );
+                map_db_error_response(request_id, error.to_string())
+            })?;
+            db.execute(&request.sql)
+                .map_err(|error| map_db_error_response(request_id, error.to_string()))
+        },
+    )
+    .await?;
+
+    info!(
+        request_id,
+        route = "/databases/:name/execute",
+        database,
+        "request completed"
+    );
     Ok(Json(ExecuteResponse {
         ok: true,
         request_id,
@@ -956,6 +1016,7 @@ fn build_app(state: AppState) -> Router {
         .route("/version", get(version))
         .route("/config", get(config_view))
         .route("/databases", get(list_databases).post(create_database))
+        .route("/databases/{name}/execute", post(execute_database))
         .route("/metrics", get(metrics))
         .route("/debug/catalog", get(debug_catalog))
         .route("/debug/storage", get(debug_storage))
@@ -1088,10 +1149,11 @@ mod tests {
             .expect("system clock should be after unix epoch")
             .as_nanos();
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let db_path = std::env::temp_dir().join(format!(
+        let root_dir = std::env::temp_dir().join(format!(
             "skepa-db-server-test-{}-{unique}-{id}",
             std::process::id()
         ));
+        let db_path = root_dir.join("default");
         let config = ServerConfig {
             db_path: db_path.clone(),
             addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
@@ -1747,6 +1809,103 @@ mod tests {
             databases
                 .iter()
                 .any(|database| database["name"] == "analytics")
+        );
+    }
+
+    #[tokio::test]
+    async fn named_database_execute_uses_requested_database() {
+        let app = test_app().await;
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"analytics"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_response.status(), StatusCode::OK);
+
+        let create_table_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"create table users (id int primary key, name text)"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_table_response.status(), StatusCode::OK);
+
+        let insert_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"insert into users values (1, \"ram\")"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(insert_response.status(), StatusCode::OK);
+
+        let select_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"select * from users"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(select_response.status(), StatusCode::OK);
+        let body = to_bytes(select_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["result"]["type"], "select");
+        assert_eq!(json["result"]["rows"][0][1], "ram");
+    }
+
+    #[tokio::test]
+    async fn named_database_execute_rejects_missing_database() {
+        let app = test_app().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/missing/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"select * from users"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(
+            json["error"]["message"],
+            "database 'missing' does not exist"
         );
     }
 
