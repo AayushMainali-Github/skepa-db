@@ -16,6 +16,14 @@ This document describes the current upgrade and release expectations for `skepa-
 - If `storage_format_version` is unchanged, existing database directories are expected to open directly.
 - If `storage_format_version` increases, treat that as a storage compatibility boundary.
 
+## Explicit Failure Expectations
+
+Operators should expect:
+
+- newer unsupported storage metadata is rejected explicitly on open
+- unchanged storage format should continue to open directly
+- import/export is the conservative fallback if compatibility is uncertain
+
 ## When Storage Format Changes
 
 Current policy:
@@ -23,6 +31,14 @@ Current policy:
 - newer binaries may reject opening databases written by a future unsupported storage format
 - automatic migrations are not implemented yet
 - use backup/restore or import/export as the conservative migration path
+
+## Downgrades
+
+Current downgrade policy:
+
+- downgrades are only expected to be safe when `storage_format_version` has not crossed a compatibility boundary
+- after any future storage format bump, assume downgrade is unsafe unless release notes say otherwise
+- use backup/restore or export/import instead of assuming downgrade support
 
 ## Release Notes Expectation
 
