@@ -199,3 +199,70 @@ fn catalog_save_includes_storage_format_version() {
         serde_json::json!(skepa_db_core::STORAGE_FORMAT_VERSION)
     );
 }
+
+#[test]
+fn catalog_loads_legacy_metadata_without_format_version() {
+    let path = temp_dir("catalog_legacy_format_load");
+    std::fs::create_dir_all(&path).unwrap();
+    let catalog_path = path.join("catalog.json");
+    std::fs::write(
+        &catalog_path,
+        r#"{
+  "tables": {
+    "users": [
+      {
+        "name": "id",
+        "dtype": "int",
+        "primary_key": true,
+        "unique": false,
+        "not_null": true
+      },
+      {
+        "name": "name",
+        "dtype": "text",
+        "primary_key": false,
+        "unique": false,
+        "not_null": false
+      }
+    ]
+  },
+  "table_constraints": {
+    "users": {
+      "primary_key": ["id"],
+      "unique": [],
+      "secondary_indexes": [],
+      "foreign_keys": []
+    }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let loaded = Catalog::load_from_path(&catalog_path).unwrap();
+    let schema = loaded.schema("users").unwrap();
+    assert_eq!(schema.columns.len(), 2);
+    assert_eq!(schema.primary_key, vec!["id".to_string()]);
+}
+
+#[test]
+fn catalog_rejects_newer_unsupported_format_version() {
+    let path = temp_dir("catalog_future_format_reject");
+    std::fs::create_dir_all(&path).unwrap();
+    let catalog_path = path.join("catalog.json");
+    let unsupported_version = skepa_db_core::STORAGE_FORMAT_VERSION + 1;
+    std::fs::write(
+        &catalog_path,
+        format!(
+            r#"{{
+  "format_version": {unsupported_version},
+  "tables": {{}},
+  "table_constraints": {{}}
+}}"#
+        ),
+    )
+    .unwrap();
+
+    let err = Catalog::load_from_path(&catalog_path).unwrap_err();
+    assert!(err.contains("newer than supported version"));
+    assert!(err.contains(&unsupported_version.to_string()));
+}
