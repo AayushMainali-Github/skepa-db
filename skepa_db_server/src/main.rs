@@ -45,7 +45,13 @@ struct AppState {
     config: ServerConfig,
     next_request_id: Arc<AtomicU64>,
     next_session_id: Arc<AtomicU64>,
-    sessions: Arc<Mutex<HashMap<u64, Arc<Mutex<Database>>>>>,
+    sessions: Arc<Mutex<HashMap<u64, SessionEntry>>>,
+}
+
+#[derive(Debug, Clone)]
+struct SessionEntry {
+    database: String,
+    db: Arc<Mutex<Database>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -287,6 +293,7 @@ struct SessionResponse {
     ok: bool,
     request_id: u64,
     session_id: u64,
+    database: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -294,6 +301,7 @@ struct SessionDeletedResponse {
     ok: bool,
     request_id: u64,
     session_id: u64,
+    database: String,
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -487,7 +495,7 @@ async fn metrics(
     let session_handles: Vec<_> = state.sessions.lock().await.values().cloned().collect();
     let mut active_session_transactions = 0usize;
     for session in session_handles {
-        if session.lock().await.has_active_transaction() {
+        if session.db.lock().await.has_active_transaction() {
             active_session_transactions += 1;
         }
     }
@@ -725,31 +733,62 @@ async fn create_session(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<SessionResponse>, (StatusCode, Json<ErrorResponse>)> {
+    create_session_for_database(state, headers, None).await
+}
+
+async fn create_database_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(database): Path<String>,
+) -> Result<Json<SessionResponse>, (StatusCode, Json<ErrorResponse>)> {
+    create_session_for_database(state, headers, Some(database)).await
+}
+
+async fn create_session_for_database(
+    state: AppState,
+    headers: HeaderMap,
+    database: Option<String>,
+) -> Result<Json<SessionResponse>, (StatusCode, Json<ErrorResponse>)> {
     let request_id = state.next_request_id();
-    validate_auth(&state, &headers, request_id, "/session")?;
+    let route = if database.is_some() {
+        "/databases/:name/session"
+    } else {
+        "/session"
+    };
+    validate_auth(&state, &headers, request_id, route)?;
     let session_id = state.next_session_id();
-    let session_db =
-        Database::open(DbConfig::new(state.config.db_path.clone())).map_err(|error| {
-            warn!(request_id, route = "/session", error = %error, "session creation failed");
-            map_db_error_response(request_id, error.to_string())
-        })?;
+    let database = match database {
+        Some(database) => validate_database_name(request_id, &database)?,
+        None => state.default_database_name(),
+    };
+    let database_path = state.database_path(&database);
+    if !database_path.exists() {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::InvalidRequest,
+            format!("database '{database}' does not exist"),
+        ));
+    }
 
-    state
-        .sessions
-        .lock()
-        .await
-        .insert(session_id, Arc::new(Mutex::new(session_db)));
+    let session_db = Database::open(DbConfig::new(database_path)).map_err(|error| {
+        warn!(request_id, route, database = %database, error = %error, "session creation failed");
+        map_db_error_response(request_id, error.to_string())
+    })?;
 
-    info!(
-        request_id,
-        route = "/session",
+    state.sessions.lock().await.insert(
         session_id,
-        "session created"
+        SessionEntry {
+            database: database.clone(),
+            db: Arc::new(Mutex::new(session_db)),
+        },
     );
+
+    info!(request_id, route, database, session_id, "session created");
     Ok(Json(SessionResponse {
         ok: true,
         request_id,
         session_id,
+        database,
     }))
 }
 
@@ -758,17 +797,38 @@ async fn delete_session(
     headers: HeaderMap,
     Path(session_id): Path<u64>,
 ) -> Result<Json<SessionDeletedResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let request_id = state.next_request_id();
-    validate_auth(&state, &headers, request_id, "/session/:id")?;
-    let session_db = state.sessions.lock().await.get(&session_id).cloned();
+    delete_session_for_database(state, headers, None, session_id).await
+}
 
-    let Some(session_db) = session_db else {
-        warn!(
-            request_id,
-            route = "/session/:id",
-            session_id,
-            "session not found"
-        );
+async fn delete_database_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((database, session_id)): Path<(String, u64)>,
+) -> Result<Json<SessionDeletedResponse>, (StatusCode, Json<ErrorResponse>)> {
+    delete_session_for_database(state, headers, Some(database), session_id).await
+}
+
+async fn delete_session_for_database(
+    state: AppState,
+    headers: HeaderMap,
+    database: Option<String>,
+    session_id: u64,
+) -> Result<Json<SessionDeletedResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    let route = if database.is_some() {
+        "/databases/:name/session/:id"
+    } else {
+        "/session/:id"
+    };
+    validate_auth(&state, &headers, request_id, route)?;
+    let expected_database = match database {
+        Some(database) => Some(validate_database_name(request_id, &database)?),
+        None => None,
+    };
+    let session = state.sessions.lock().await.get(&session_id).cloned();
+
+    let Some(session) = session else {
+        warn!(request_id, route, session_id, "session not found");
         return Err(error_response(
             request_id,
             ApiErrorCode::SessionNotFound,
@@ -776,12 +836,20 @@ async fn delete_session(
         ));
     };
 
-    if session_db.lock().await.has_active_transaction() {
+    if let Some(expected_database) = expected_database.as_deref()
+        && session.database != expected_database
+    {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::SessionNotFound,
+            format!("session {session_id} was not found"),
+        ));
+    }
+
+    if session.db.lock().await.has_active_transaction() {
         warn!(
             request_id,
-            route = "/session/:id",
-            session_id,
-            "refused to delete session with active transaction"
+            route, session_id, "refused to delete session with active transaction"
         );
         return Err(error_response(
             request_id,
@@ -794,7 +862,8 @@ async fn delete_session(
 
     info!(
         request_id,
-        route = "/session/:id",
+        route,
+        database = %session.database,
         session_id,
         "session deleted"
     );
@@ -802,6 +871,7 @@ async fn delete_session(
         ok: true,
         request_id,
         session_id,
+        database: session.database,
     }))
 }
 
@@ -811,15 +881,34 @@ async fn execute_session(
     Path(session_id): Path<u64>,
     Json(request): Json<ExecuteRequest>,
 ) -> Result<Json<ExecuteResponse>, (StatusCode, Json<ErrorResponse>)> {
+    execute_session_for_database(state, headers, None, session_id, request).await
+}
+
+async fn execute_database_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((database, session_id)): Path<(String, u64)>,
+    Json(request): Json<ExecuteRequest>,
+) -> Result<Json<ExecuteResponse>, (StatusCode, Json<ErrorResponse>)> {
+    execute_session_for_database(state, headers, Some(database), session_id, request).await
+}
+
+async fn execute_session_for_database(
+    state: AppState,
+    headers: HeaderMap,
+    database: Option<String>,
+    session_id: u64,
+    request: ExecuteRequest,
+) -> Result<Json<ExecuteResponse>, (StatusCode, Json<ErrorResponse>)> {
     let request_id = state.next_request_id();
-    validate_auth(&state, &headers, request_id, "/session/:id/execute")?;
+    let route = if database.is_some() {
+        "/databases/:name/session/:id/execute"
+    } else {
+        "/session/:id/execute"
+    };
+    validate_auth(&state, &headers, request_id, route)?;
     if request.sql.trim().is_empty() {
-        warn!(
-            request_id,
-            route = "/session/:id/execute",
-            session_id,
-            "rejected empty sql"
-        );
+        warn!(request_id, route, session_id, "rejected empty sql");
         return Err(error_response(
             request_id,
             ApiErrorCode::InvalidRequest,
@@ -827,19 +916,19 @@ async fn execute_session(
         ));
     }
 
-    let session_db = state
+    let expected_database = match database {
+        Some(database) => Some(validate_database_name(request_id, &database)?),
+        None => None,
+    };
+
+    let session = state
         .sessions
         .lock()
         .await
         .get(&session_id)
         .cloned()
         .ok_or_else(|| {
-            warn!(
-                request_id,
-                route = "/session/:id/execute",
-                session_id,
-                "session not found"
-            );
+            warn!(request_id, route, session_id, "session not found");
             error_response(
                 request_id,
                 ApiErrorCode::SessionNotFound,
@@ -847,31 +936,38 @@ async fn execute_session(
             )
         })?;
 
+    if let Some(expected_database) = expected_database.as_deref()
+        && session.database != expected_database
+    {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::SessionNotFound,
+            format!("session {session_id} was not found"),
+        ));
+    }
+
     if let Some(idempotency_key) = request.idempotency_key.as_deref() {
         info!(
             request_id,
-            route = "/session/:id/execute",
+            route,
+            database = %session.database,
             session_id,
             idempotency_key,
             "received idempotency key"
         );
     }
 
-    let result = execute_with_timeout(
-        request_id,
-        "/session/:id/execute",
-        request.timeout_ms,
-        async {
-            let mut db = session_db.lock().await;
-            db.execute(&request.sql)
-                .map_err(|error| map_db_error_response(request_id, error.to_string()))
-        },
-    )
+    let result = execute_with_timeout(request_id, route, request.timeout_ms, async {
+        let mut db = session.db.lock().await;
+        db.execute(&request.sql)
+            .map_err(|error| map_db_error_response(request_id, error.to_string()))
+    })
     .await?;
 
     info!(
         request_id,
-        route = "/session/:id/execute",
+        route,
+        database = %session.database,
         session_id,
         "request completed"
     );
@@ -1080,6 +1176,15 @@ fn build_app(state: AppState) -> Router {
         .route("/databases", get(list_databases).post(create_database))
         .route("/databases/{name}", delete(delete_database))
         .route("/databases/{name}/execute", post(execute_database))
+        .route("/databases/{name}/session", post(create_database_session))
+        .route(
+            "/databases/{name}/session/{id}",
+            delete(delete_database_session),
+        )
+        .route(
+            "/databases/{name}/session/{id}/execute",
+            post(execute_database_session),
+        )
         .route("/metrics", get(metrics))
         .route("/debug/catalog", get(debug_catalog))
         .route("/debug/storage", get(debug_storage))
@@ -1584,6 +1689,227 @@ mod tests {
         assert_eq!(json["ok"], false);
         assert_eq!(json["error"]["code"], "SESSION_NOT_FOUND");
         assert_eq!(json["error"]["message"], "session 999 was not found");
+    }
+
+    #[tokio::test]
+    async fn create_database_session_binds_session_to_named_database() {
+        let app = test_app().await;
+
+        let create_database_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"analytics"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_database_response.status(), StatusCode::OK);
+
+        let create_session_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/session")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(create_session_response.status(), StatusCode::OK);
+        let body = to_bytes(create_session_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["session_id"], 1);
+        assert_eq!(json["database"], "analytics");
+    }
+
+    #[tokio::test]
+    async fn database_session_execute_uses_named_database_transaction_state() {
+        let app = test_app().await;
+
+        let create_database_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"analytics"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_database_response.status(), StatusCode::OK);
+
+        let create_table_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"create table users (id int primary key, name text)"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_table_response.status(), StatusCode::OK);
+
+        let create_session_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/session")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_session_response.status(), StatusCode::OK);
+
+        let begin_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/session/1/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"begin"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(begin_response.status(), StatusCode::OK);
+
+        let insert_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/session/1/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"sql":"insert into users values (1, \"ram\")"}"#,
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(insert_response.status(), StatusCode::OK);
+
+        let stateless_select_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"select * from users"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(stateless_select_response.status(), StatusCode::OK);
+        let body = to_bytes(stateless_select_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["result"]["rows"].as_array().unwrap().len(), 0);
+
+        let commit_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/session/1/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"commit"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(commit_response.status(), StatusCode::OK);
+
+        let committed_select_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"select * from users"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(committed_select_response.status(), StatusCode::OK);
+        let body = to_bytes(committed_select_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["result"]["rows"][0][1], "ram");
+    }
+
+    #[tokio::test]
+    async fn database_session_routes_reject_session_for_other_database() {
+        let app = test_app().await;
+
+        for database in ["analytics", "archive"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/databases")
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(r#"{{"name":"{database}"}}"#)))
+                        .expect("request should build"),
+                )
+                .await
+                .expect("request should succeed");
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+
+        let create_session_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/analytics/session")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_session_response.status(), StatusCode::OK);
+
+        let wrong_database_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases/archive/session/1/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"sql":"select 1"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(wrong_database_response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(wrong_database_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["error"]["code"], "SESSION_NOT_FOUND");
+        assert_eq!(json["error"]["message"], "session 1 was not found");
     }
 
     #[tokio::test]
