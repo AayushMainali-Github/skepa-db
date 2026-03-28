@@ -18,3 +18,5 @@ Desktop.ini
 **/catalog.json
 **/wal.log
 **/tables/*.rows
+
+.codex-e2e
