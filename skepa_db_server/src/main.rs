@@ -120,6 +120,13 @@ struct DatabaseCreateResponse {
     database: DatabaseInfo,
 }
 
+#[derive(Debug, Serialize)]
+struct DatabaseDeletedResponse {
+    ok: bool,
+    request_id: u64,
+    database: DatabaseInfo,
+}
+
 impl AppState {
     fn next_request_id(&self) -> u64 {
         self.next_request_id.fetch_add(1, Ordering::Relaxed)
@@ -198,6 +205,7 @@ enum ApiErrorCode {
     InvalidRequest,
     Unauthorized,
     DatabaseAlreadyExists,
+    DatabaseDeleteDenied,
     SqlParseError,
     TransactionRequiresSession,
     SessionNotFound,
@@ -389,6 +397,60 @@ async fn create_database(
             path: path.display().to_string(),
             is_default: name == state.default_database_name(),
             name,
+        },
+    }))
+}
+
+async fn delete_database(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(database): Path<String>,
+) -> Result<Json<DatabaseDeletedResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/databases/:name")?;
+    let database = validate_database_name(request_id, &database)?;
+
+    if database == state.default_database_name() {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::DatabaseDeleteDenied,
+            format!("database '{database}' is the configured default and cannot be deleted"),
+        ));
+    }
+
+    let path = state.database_path(&database);
+    if !path.exists() {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::InvalidRequest,
+            format!("database '{database}' does not exist"),
+        ));
+    }
+
+    fs::remove_dir_all(&path).map_err(|error| {
+        warn!(
+            request_id,
+            route = "/databases/:name",
+            database,
+            error = %error,
+            "failed to delete database directory"
+        );
+        map_db_error_response(request_id, error.to_string())
+    })?;
+
+    info!(
+        request_id,
+        route = "/databases/:name",
+        database,
+        "database deleted"
+    );
+    Ok(Json(DatabaseDeletedResponse {
+        ok: true,
+        request_id,
+        database: DatabaseInfo {
+            path: path.display().to_string(),
+            is_default: false,
+            name: database,
         },
     }))
 }
@@ -1016,6 +1078,7 @@ fn build_app(state: AppState) -> Router {
         .route("/version", get(version))
         .route("/config", get(config_view))
         .route("/databases", get(list_databases).post(create_database))
+        .route("/databases/{name}", delete(delete_database))
         .route("/databases/{name}/execute", post(execute_database))
         .route("/metrics", get(metrics))
         .route("/debug/catalog", get(debug_catalog))
@@ -1907,6 +1970,86 @@ mod tests {
             json["error"]["message"],
             "database 'missing' does not exist"
         );
+    }
+
+    #[tokio::test]
+    async fn delete_database_removes_named_database_directory() {
+        let app = test_app().await;
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"analytics"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(create_response.status(), StatusCode::OK);
+
+        let delete_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri("/databases/analytics")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(delete_response.status(), StatusCode::OK);
+
+        let list_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/databases")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(list_response.status(), StatusCode::OK);
+        let body = to_bytes(list_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        let databases = json["databases"].as_array().expect("databases array");
+        assert!(
+            !databases
+                .iter()
+                .any(|database| database["name"] == "analytics")
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_database_rejects_default_database() {
+        let state = test_state().await;
+        let default_name = state.default_database_name();
+        let app = build_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri(format!("/databases/{default_name}"))
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["error"]["code"], "DATABASE_DELETE_DENIED");
     }
 
     #[tokio::test]
