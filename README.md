@@ -128,6 +128,8 @@ Current HTTP server surface includes:
 
 When an auth token is configured, admin and query endpoints require `Authorization: Bearer <token>`. `GET /health` and `GET /version` stay public for liveness and version checks.
 
+The server starts with a metadata banner in logs and performs a best-effort checkpoint across discovered databases when shutting down on `Ctrl+C`.
+
 TLS should currently be terminated by a reverse proxy or trusted ingress in front of `skepa_db_server`.
 
 ## Quality Gates

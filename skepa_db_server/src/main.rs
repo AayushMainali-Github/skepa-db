@@ -169,6 +169,7 @@ struct HealthResponse {
 struct VersionResponse {
     ok: bool,
     request_id: u64,
+    server: &'static str,
     version: &'static str,
 }
 
@@ -318,6 +319,7 @@ async fn version(State(state): State<AppState>) -> Json<VersionResponse> {
     Json(VersionResponse {
         ok: true,
         request_id,
+        server: "skepa_db_server",
         version: env!("CARGO_PKG_VERSION"),
     })
 }
@@ -1197,6 +1199,52 @@ fn build_app(state: AppState) -> Router {
         .with_state(state)
 }
 
+fn discover_database_names(state: &AppState) -> Result<Vec<String>, String> {
+    let data_dir = state.data_dir();
+    fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
+
+    let mut names = fs::read_dir(&data_dir)
+        .map_err(|error| error.to_string())?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_dir() {
+                return None;
+            }
+            entry.file_name().into_string().ok()
+        })
+        .collect::<Vec<_>>();
+
+    if !names
+        .iter()
+        .any(|name| name == &state.default_database_name())
+    {
+        names.push(state.default_database_name());
+    }
+
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+fn checkpoint_database_directory(path: PathBuf) -> Result<(), String> {
+    let db = Database::open(DbConfig::new(path)).map_err(|error| error.to_string())?;
+    db.checkpoint().map_err(|error| error.to_string())
+}
+
+async fn checkpoint_all_databases(state: &AppState) -> Result<Vec<String>, String> {
+    let database_names = discover_database_names(state)?;
+    for database in &database_names {
+        checkpoint_database_directory(state.database_path(database))?;
+    }
+    Ok(database_names)
+}
+
+async fn shutdown_signal() -> Result<(), Box<dyn std::error::Error>> {
+    tokio::signal::ctrl_c().await?;
+    Ok(())
+}
+
 fn parse_server_config() -> Result<ServerConfig, Box<dyn std::error::Error>> {
     let mut config_path: Option<PathBuf> = env::var("SKEPA_DB_CONFIG").ok().map(PathBuf::from);
 
@@ -1322,14 +1370,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = build_app(state.clone());
 
     info!(
-        "starting skepa_db_server on {} using data dir {} with default database {}",
-        state.config.addr,
-        state.config.data_dir.display(),
-        state.config.default_database
+        server = "skepa_db_server",
+        version = env!("CARGO_PKG_VERSION"),
+        addr = %state.config.addr,
+        data_dir = %state.config.data_dir.display(),
+        default_database = %state.config.default_database,
+        auth_enabled = state.config.auth_token.is_some(),
+        tls_terminated = state.config.tls_terminated,
+        "server starting"
     );
 
     let listener = tokio::net::TcpListener::bind(state.config.addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            if let Err(error) = shutdown_signal().await {
+                warn!(error = %error, "failed to wait for shutdown signal");
+                return;
+            }
+
+            info!("shutdown signal received, checkpointing databases");
+            match checkpoint_all_databases(&state).await {
+                Ok(databases) => info!(database_count = databases.len(), databases = ?databases, "shutdown checkpoint completed"),
+                Err(error) => warn!(error = %error, "shutdown checkpoint failed"),
+            }
+        })
+        .await?;
     Ok(())
 }
 
@@ -1402,6 +1467,29 @@ mod tests {
         assert!(json["request_id"].as_u64().is_some());
         assert_eq!(json["result"]["type"], "schema_change");
         assert_eq!(json["result"]["message"], "created table users");
+    }
+
+    #[tokio::test]
+    async fn version_endpoint_reports_server_metadata() {
+        let app = test_app().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/version")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["server"], "skepa_db_server");
+        assert!(json["version"].as_str().is_some());
     }
 
     #[tokio::test]
@@ -2434,6 +2522,53 @@ mod tests {
             .expect("body should read");
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["error"]["code"], "DATABASE_DELETE_DENIED");
+    }
+
+    #[tokio::test]
+    async fn discover_database_names_includes_default_and_created_databases() {
+        let state = test_state().await;
+        Database::open(DbConfig::new(state.database_path("analytics")))
+            .expect("analytics db should open");
+
+        let database_names =
+            discover_database_names(&state).expect("database discovery should succeed");
+
+        assert!(database_names.iter().any(|name| name == "default"));
+        assert!(database_names.iter().any(|name| name == "analytics"));
+    }
+
+    #[tokio::test]
+    async fn checkpoint_all_databases_flushes_named_database_state() {
+        let state = test_state().await;
+        let analytics_path = state.database_path("analytics");
+        let mut analytics = Database::open(DbConfig::new(analytics_path.clone()))
+            .expect("analytics db should open");
+        analytics
+            .execute("create table users (id int primary key, name text)")
+            .expect("create table should succeed");
+        analytics
+            .execute("insert into users values (1, \"ram\")")
+            .expect("insert should succeed");
+
+        checkpoint_all_databases(&state)
+            .await
+            .expect("checkpoint should succeed");
+
+        let mut reopened = Database::open(DbConfig::new(analytics_path)).expect("db should reopen");
+        let result = reopened
+            .execute("select * from users")
+            .expect("select should succeed");
+
+        match result {
+            QueryResult::Select { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(
+                    rows[0][1],
+                    skepa_db_core::types::value::Value::Text("ram".to_string())
+                );
+            }
+            other => panic!("expected select result, got {other:?}"),
+        }
     }
 
     #[tokio::test]

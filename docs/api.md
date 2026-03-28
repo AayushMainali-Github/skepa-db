@@ -82,6 +82,7 @@ When `auth_token` is configured:
 - protected endpoints require `Authorization: Bearer <token>`
 - missing or invalid tokens return `401 Unauthorized`
 - `GET /health` and `GET /version` remain public
+- `GET /version` returns server name and package version metadata
 
 Example server config file:
 
@@ -96,6 +97,8 @@ Example server config file:
 ```
 
 `tls_terminated` means TLS is expected to be handled by a reverse proxy or trusted ingress in front of `skepa_db_server`. The current server does not terminate TLS itself.
+
+On process shutdown, the server listens for `Ctrl+C` and attempts a best-effort checkpoint across the discovered database directories under `data_dir` before exiting.
 
 ## Stateless And Session Endpoints
 
