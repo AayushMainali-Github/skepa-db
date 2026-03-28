@@ -25,7 +25,8 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Clone)]
 struct ServerConfig {
-    db_path: PathBuf,
+    data_dir: PathBuf,
+    default_database: String,
     addr: SocketAddr,
     auth_token: Option<String>,
     tls_terminated: bool,
@@ -33,6 +34,8 @@ struct ServerConfig {
 
 #[derive(Debug, Default, Deserialize)]
 struct ServerFileConfig {
+    data_dir: Option<PathBuf>,
+    default_database: Option<String>,
     db_path: Option<PathBuf>,
     addr: Option<String>,
     auth_token: Option<String>,
@@ -143,20 +146,11 @@ impl AppState {
     }
 
     fn data_dir(&self) -> PathBuf {
-        self.config
-            .db_path
-            .parent()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| self.config.db_path.clone())
+        self.config.data_dir.clone()
     }
 
     fn default_database_name(&self) -> String {
-        self.config
-            .db_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("default")
-            .to_string()
+        self.config.default_database.clone()
     }
 
     fn database_path(&self, name: &str) -> PathBuf {
@@ -311,7 +305,10 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         ok: true,
         request_id,
-        db_path: state.config.db_path.display().to_string(),
+        db_path: state
+            .database_path(&state.default_database_name())
+            .display()
+            .to_string(),
     })
 }
 
@@ -475,7 +472,10 @@ async fn config_view(
         ok: true,
         request_id,
         config: ConfigView {
-            db_path: state.config.db_path.display().to_string(),
+            db_path: state
+                .database_path(&state.default_database_name())
+                .display()
+                .to_string(),
             data_dir: state.data_dir().display().to_string(),
             default_database: state.default_database_name(),
             addr: state.config.addr.to_string(),
@@ -1216,11 +1216,19 @@ fn parse_server_config() -> Result<ServerConfig, Box<dyn std::error::Error>> {
         ServerFileConfig::default()
     };
 
-    let mut db_path = file_config
-        .db_path
-        .unwrap_or_else(|| PathBuf::from("./mydb"));
+    let mut db_path = file_config.db_path;
+    let mut data_dir = file_config.data_dir.unwrap_or_else(|| PathBuf::from("."));
+    let mut default_database = file_config
+        .default_database
+        .unwrap_or_else(|| "mydb".to_string());
     if let Ok(env_path) = env::var("SKEPA_DB_PATH") {
-        db_path = PathBuf::from(env_path);
+        db_path = Some(PathBuf::from(env_path));
+    }
+    if let Ok(env_data_dir) = env::var("SKEPA_DB_DATA_DIR") {
+        data_dir = PathBuf::from(env_data_dir);
+    }
+    if let Ok(env_default_database) = env::var("SKEPA_DB_DEFAULT_DATABASE") {
+        default_database = env_default_database;
     }
 
     let mut addr = file_config
@@ -1244,7 +1252,13 @@ fn parse_server_config() -> Result<ServerConfig, Box<dyn std::error::Error>> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--db-path" => {
-                db_path = args.next().ok_or("missing value for --db-path")?.into();
+                db_path = Some(args.next().ok_or("missing value for --db-path")?.into());
+            }
+            "--data-dir" => {
+                data_dir = args.next().ok_or("missing value for --data-dir")?.into();
+            }
+            "--default-database" => {
+                default_database = args.next().ok_or("missing value for --default-database")?;
             }
             "--addr" => {
                 addr = args.next().ok_or("missing value for --addr")?;
@@ -1262,8 +1276,25 @@ fn parse_server_config() -> Result<ServerConfig, Box<dyn std::error::Error>> {
         }
     }
 
+    if let Some(db_path) = db_path {
+        data_dir = db_path
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        default_database = db_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("db path must end with a database directory name")?
+            .to_string();
+    }
+
+    if default_database.trim().is_empty() {
+        return Err("default database must not be empty".into());
+    }
+
     Ok(ServerConfig {
-        db_path,
+        data_dir,
+        default_database,
         addr: addr.parse()?,
         auth_token,
         tls_terminated,
@@ -1279,7 +1310,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let config = parse_server_config()?;
-    let db = Database::open(DbConfig::new(config.db_path.clone()))?;
+    let default_db_path = config.data_dir.join(&config.default_database);
+    let db = Database::open(DbConfig::new(default_db_path.clone()))?;
     let state = AppState {
         db: Arc::new(Mutex::new(db)),
         config,
@@ -1290,9 +1322,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = build_app(state.clone());
 
     info!(
-        "starting skepa_db_server on {} using db {}",
+        "starting skepa_db_server on {} using data dir {} with default database {}",
         state.config.addr,
-        state.config.db_path.display()
+        state.config.data_dir.display(),
+        state.config.default_database
     );
 
     let listener = tokio::net::TcpListener::bind(state.config.addr).await?;
@@ -1323,7 +1356,8 @@ mod tests {
         ));
         let db_path = root_dir.join("default");
         let config = ServerConfig {
-            db_path: db_path.clone(),
+            data_dir: root_dir,
+            default_database: "default".to_string(),
             addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
             auth_token: None,
             tls_terminated: false,
@@ -1948,7 +1982,15 @@ mod tests {
     async fn execute_requires_bearer_token_when_configured() {
         let db_path = std::env::temp_dir().join("skepa-db-server-auth-test");
         let config = ServerConfig {
-            db_path: db_path.clone(),
+            data_dir: db_path
+                .parent()
+                .expect("db path should have parent")
+                .to_path_buf(),
+            default_database: db_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("db path should have file name")
+                .to_string(),
             addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
             auth_token: Some("secret-token".to_string()),
             tls_terminated: false,
@@ -2042,7 +2084,15 @@ mod tests {
     async fn health_stays_public_when_auth_is_configured() {
         let db_path = std::env::temp_dir().join("skepa-db-server-auth-health-test");
         let config = ServerConfig {
-            db_path: db_path.clone(),
+            data_dir: db_path
+                .parent()
+                .expect("db path should have parent")
+                .to_path_buf(),
+            default_database: db_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("db path should have file name")
+                .to_string(),
             addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
             auth_token: Some("secret-token".to_string()),
             tls_terminated: true,
@@ -2075,7 +2125,15 @@ mod tests {
     async fn config_endpoint_masks_auth_value_but_reports_auth_enabled() {
         let db_path = std::env::temp_dir().join("skepa-db-server-config-test");
         let config = ServerConfig {
-            db_path: db_path.clone(),
+            data_dir: db_path
+                .parent()
+                .expect("db path should have parent")
+                .to_path_buf(),
+            default_database: db_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("db path should have file name")
+                .to_string(),
             addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
             auth_token: Some("secret-token".to_string()),
             tls_terminated: true,
@@ -2406,7 +2464,15 @@ mod tests {
     async fn debug_catalog_requires_auth_when_configured() {
         let db_path = std::env::temp_dir().join("skepa-db-server-debug-catalog-test");
         let config = ServerConfig {
-            db_path: db_path.clone(),
+            data_dir: db_path
+                .parent()
+                .expect("db path should have parent")
+                .to_path_buf(),
+            default_database: db_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("db path should have file name")
+                .to_string(),
             addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
             auth_token: Some("secret-token".to_string()),
             tls_terminated: false,
@@ -2439,7 +2505,15 @@ mod tests {
     async fn checkpoint_endpoint_runs_when_authorized() {
         let db_path = std::env::temp_dir().join("skepa-db-server-checkpoint-test");
         let config = ServerConfig {
-            db_path: db_path.clone(),
+            data_dir: db_path
+                .parent()
+                .expect("db path should have parent")
+                .to_path_buf(),
+            default_database: db_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("db path should have file name")
+                .to_string(),
             addr: "127.0.0.1:0".parse().expect("valid loopback addr"),
             auth_token: Some("secret-token".to_string()),
             tls_terminated: false,

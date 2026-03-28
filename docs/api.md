@@ -61,15 +61,21 @@ The server now supports optional bearer-token protection.
 Config inputs:
 
 - `--config <path>`
+- `--data-dir <path>`
+- `--default-database <name>`
 - `--db-path <path>`
 - `--addr <host:port>`
 - `--auth-token <token>`
 - `--tls-terminated`
 - `SKEPA_DB_CONFIG`
+- `SKEPA_DB_DATA_DIR`
+- `SKEPA_DB_DEFAULT_DATABASE`
 - `SKEPA_DB_PATH`
 - `SKEPA_DB_ADDR`
 - `SKEPA_DB_AUTH_TOKEN`
 - `SKEPA_DB_TLS_TERMINATED`
+
+`--db-path` and `SKEPA_DB_PATH` remain supported as compatibility shorthands for setting both the data directory and default database from a single path.
 
 When `auth_token` is configured:
 
@@ -81,7 +87,8 @@ Example server config file:
 
 ```json
 {
-  "db_path": "./mydb",
+  "data_dir": "./data",
+  "default_database": "default",
   "addr": "127.0.0.1:8080",
   "auth_token": "replace-me",
   "tls_terminated": true

@@ -48,7 +48,7 @@ Run:
 
 ```bash
 cargo run -p skepa_db_cli
-cargo run -p skepa_db_server -- --db-path ./mydb --addr 127.0.0.1:8080
+cargo run -p skepa_db_server -- --data-dir ./data --default-database default --addr 127.0.0.1:8080
 ```
 
 ## Start Using
@@ -86,8 +86,9 @@ cargo run -p skepa_db_server -- --config ./server.json --tls-terminated
 
 ## Data Location
 
-Database files are stored under the DB path used by the CLI/runtime.
-Keep that folder safe; it contains table data, catalog metadata, and WAL.
+CLI-embedded mode stores files under the DB path you open directly.
+The server stores named database directories under its configured data directory.
+Keep those folders safe; they contain table data, catalog metadata, and WAL.
 
 ## Backup / Restore (Current)
 
