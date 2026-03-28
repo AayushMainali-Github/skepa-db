@@ -51,6 +51,9 @@ jobs:
         shell: bash
         run: |
           while IFS=: read -r src dest; do
+            if [ -z "$src" ] || [ -z "$dest" ]; then
+              continue
+            fi
             cp "target/release/${src}" "${dest}"
             chmod +x "${dest}"
           done <<< "${{ matrix.artifacts }}"
