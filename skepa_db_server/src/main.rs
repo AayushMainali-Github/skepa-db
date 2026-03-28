@@ -12,6 +12,7 @@ use skepa_db_core::storage::Schema;
 use skepa_db_core::types::Row;
 use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -57,6 +58,8 @@ struct ConfigResponse {
 #[derive(Debug, Serialize)]
 struct ConfigView {
     db_path: String,
+    data_dir: String,
+    default_database: String,
     addr: String,
     auth_enabled: bool,
     tls_terminated: bool,
@@ -91,6 +94,32 @@ struct CheckpointResponse {
     message: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct DatabaseCreateRequest {
+    name: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseInfo {
+    name: String,
+    path: String,
+    is_default: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseListResponse {
+    ok: bool,
+    request_id: u64,
+    databases: Vec<DatabaseInfo>,
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseCreateResponse {
+    ok: bool,
+    request_id: u64,
+    database: DatabaseInfo,
+}
+
 impl AppState {
     fn next_request_id(&self) -> u64 {
         self.next_request_id.fetch_add(1, Ordering::Relaxed)
@@ -98,6 +127,27 @@ impl AppState {
 
     fn next_session_id(&self) -> u64 {
         self.next_session_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn data_dir(&self) -> PathBuf {
+        self.config
+            .db_path
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.config.db_path.clone())
+    }
+
+    fn default_database_name(&self) -> String {
+        self.config
+            .db_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("default")
+            .to_string()
+    }
+
+    fn database_path(&self, name: &str) -> PathBuf {
+        self.data_dir().join(name)
     }
 }
 
@@ -147,6 +197,7 @@ struct ErrorBody {
 enum ApiErrorCode {
     InvalidRequest,
     Unauthorized,
+    DatabaseAlreadyExists,
     SqlParseError,
     TransactionRequiresSession,
     SessionNotFound,
@@ -258,6 +309,94 @@ async fn version(State(state): State<AppState>) -> Json<VersionResponse> {
     })
 }
 
+async fn list_databases(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<DatabaseListResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/databases")?;
+
+    let data_dir = state.data_dir();
+    fs::create_dir_all(&data_dir).map_err(|error| {
+        warn!(request_id, route = "/databases", error = %error, "failed to ensure data directory");
+        map_db_error_response(request_id, error.to_string())
+    })?;
+
+    let default_name = state.default_database_name();
+    let mut databases = fs::read_dir(&data_dir)
+        .map_err(|error| {
+            warn!(request_id, route = "/databases", error = %error, "failed to read data directory");
+            map_db_error_response(request_id, error.to_string())
+        })?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_dir() {
+                return None;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            Some(DatabaseInfo {
+                path: entry.path().display().to_string(),
+                is_default: name == default_name,
+                name,
+            })
+        })
+        .collect::<Vec<_>>();
+    databases.sort_by(|left, right| left.name.cmp(&right.name));
+
+    info!(
+        request_id,
+        route = "/databases",
+        count = databases.len(),
+        "request completed"
+    );
+    Ok(Json(DatabaseListResponse {
+        ok: true,
+        request_id,
+        databases,
+    }))
+}
+
+async fn create_database(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<DatabaseCreateRequest>,
+) -> Result<Json<DatabaseCreateResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let request_id = state.next_request_id();
+    validate_auth(&state, &headers, request_id, "/databases")?;
+    let name = validate_database_name(request_id, &request.name)?;
+    let path = state.database_path(&name);
+
+    if path.exists() {
+        warn!(request_id, route = "/databases", database = %name, "database already exists");
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::DatabaseAlreadyExists,
+            format!("database '{name}' already exists"),
+        ));
+    }
+
+    fs::create_dir_all(&path).map_err(|error| {
+        warn!(request_id, route = "/databases", database = %name, error = %error, "failed to create database directory");
+        map_db_error_response(request_id, error.to_string())
+    })?;
+    Database::open(DbConfig::new(path.clone())).map_err(|error| {
+        warn!(request_id, route = "/databases", database = %name, error = %error, "failed to initialize database");
+        map_db_error_response(request_id, error.to_string())
+    })?;
+
+    info!(request_id, route = "/databases", database = %name, "database created");
+    Ok(Json(DatabaseCreateResponse {
+        ok: true,
+        request_id,
+        database: DatabaseInfo {
+            path: path.display().to_string(),
+            is_default: name == state.default_database_name(),
+            name,
+        },
+    }))
+}
+
 async fn config_view(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -271,6 +410,8 @@ async fn config_view(
         request_id,
         config: ConfigView {
             db_path: state.config.db_path.display().to_string(),
+            data_dir: state.data_dir().display().to_string(),
+            default_database: state.default_database_name(),
             addr: state.config.addr.to_string(),
             auth_enabled: state.config.auth_token.is_some(),
             tls_terminated: state.config.tls_terminated,
@@ -717,6 +858,33 @@ fn map_db_error_response(
     error_response(request_id, code, message)
 }
 
+fn validate_database_name(
+    request_id: u64,
+    name: &str,
+) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::InvalidRequest,
+            "database name must not be empty",
+        ));
+    }
+
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err(error_response(
+            request_id,
+            ApiErrorCode::InvalidRequest,
+            "database name may only contain letters, digits, '-' and '_'",
+        ));
+    }
+
+    Ok(trimmed.to_string())
+}
+
 async fn execute_with_timeout<T, F>(
     request_id: u64,
     route: &'static str,
@@ -787,6 +955,7 @@ fn build_app(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/version", get(version))
         .route("/config", get(config_view))
+        .route("/databases", get(list_databases).post(create_database))
         .route("/metrics", get(metrics))
         .route("/debug/catalog", get(debug_catalog))
         .route("/debug/storage", get(debug_storage))
@@ -1490,7 +1659,95 @@ mod tests {
         assert_eq!(json["config"]["auth_enabled"], true);
         assert_eq!(json["config"]["tls_terminated"], true);
         assert_eq!(json["config"]["db_path"], db_path.display().to_string());
+        assert_eq!(
+            json["config"]["data_dir"],
+            db_path
+                .parent()
+                .expect("db path should have parent")
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            json["config"]["default_database"],
+            "skepa-db-server-config-test"
+        );
         assert!(json["config"].get("auth_token").is_none());
+    }
+
+    #[tokio::test]
+    async fn list_databases_reports_default_database_directory() {
+        let state = test_state().await;
+        let expected_name = state.default_database_name();
+        let app = build_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/databases")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        let databases = json["databases"].as_array().expect("databases array");
+        assert!(databases
+            .iter()
+            .any(|database| database["name"] == expected_name && database["is_default"] == true));
+    }
+
+    #[tokio::test]
+    async fn create_database_creates_named_database_directory() {
+        let app = test_app().await;
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/databases")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"analytics"}"#))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        assert_eq!(json["database"]["name"], "analytics");
+        assert_eq!(json["database"]["is_default"], false);
+
+        let list_response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/databases")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(list_response.status(), StatusCode::OK);
+        let body = to_bytes(list_response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+        let databases = json["databases"].as_array().expect("databases array");
+        assert!(
+            databases
+                .iter()
+                .any(|database| database["name"] == "analytics")
+        );
     }
 
     #[tokio::test]

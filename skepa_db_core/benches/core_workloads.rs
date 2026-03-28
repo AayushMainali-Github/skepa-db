@@ -11,47 +11,60 @@ fn bench_core_workloads(c: &mut Criterion) {
     let mut group = c.benchmark_group("core_workloads");
 
     for &row_count in ROW_COUNTS {
-        group.bench_with_input(BenchmarkId::new("indexed_eq_select", row_count), &row_count, |b, &row_count| {
-            let mut db = setup_users_db(row_count);
-            b.iter(|| {
-                db.execute("select name from users where id = 777")
-                    .expect("indexed equality select should succeed");
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("indexed_eq_select", row_count),
+            &row_count,
+            |b, &row_count| {
+                let mut db = setup_users_db(row_count);
+                b.iter(|| {
+                    db.execute("select name from users where id = 777")
+                        .expect("indexed equality select should succeed");
+                });
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("full_scan_select", row_count), &row_count, |b, &row_count| {
-            let mut db = setup_users_db(row_count);
-            b.iter(|| {
-                db.execute("select * from users where age >= 0")
-                    .expect("full scan select should succeed");
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("full_scan_select", row_count),
+            &row_count,
+            |b, &row_count| {
+                let mut db = setup_users_db(row_count);
+                b.iter(|| {
+                    db.execute("select * from users where age >= 0")
+                        .expect("full scan select should succeed");
+                });
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("indexed_update", row_count), &row_count, |b, &row_count| {
-            let mut db = setup_users_db(row_count);
-            let mut next_age = 1000_i64;
-            b.iter(|| {
-                let sql = format!("update users set age = {next_age} where id = 777");
-                next_age += 1;
-                db.execute(&sql)
-                    .expect("indexed update should succeed");
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("indexed_update", row_count),
+            &row_count,
+            |b, &row_count| {
+                let mut db = setup_users_db(row_count);
+                let mut next_age = 1000_i64;
+                b.iter(|| {
+                    let sql = format!("update users set age = {next_age} where id = 777");
+                    next_age += 1;
+                    db.execute(&sql).expect("indexed update should succeed");
+                });
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("indexed_delete_insert", row_count), &row_count, |b, &row_count| {
-            let mut db = setup_users_db(row_count);
-            let mut next_id = 10_000_i64;
-            b.iter(|| {
-                db.execute("delete from users where id = 777")
-                    .expect("delete should succeed");
-                let sql = format!(
-                    "insert into users values ({next_id}, \"user-{next_id}\", 42)"
-                );
-                next_id += 1;
-                db.execute(&sql)
-                    .expect("insert should succeed");
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("indexed_delete_insert", row_count),
+            &row_count,
+            |b, &row_count| {
+                let mut db = setup_users_db(row_count);
+                let mut next_id = 10_000_i64;
+                b.iter(|| {
+                    db.execute("delete from users where id = 777")
+                        .expect("delete should succeed");
+                    let sql =
+                        format!("insert into users values ({next_id}, \"user-{next_id}\", 42)");
+                    next_id += 1;
+                    db.execute(&sql).expect("insert should succeed");
+                });
+            },
+        );
 
         group.bench_with_input(
             BenchmarkId::new("transaction_begin_commit", row_count),
