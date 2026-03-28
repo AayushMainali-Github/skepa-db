@@ -20,6 +20,10 @@ Every release note should include:
 - upgrade notes
 - operator action required, if any
 
+Use `.github/release-notes-template.md` as the source template, and keep a concrete release-note draft under `docs/releases/` before tagging.
+
+Use `.github/release-notes-template.md` as the source template, and keep a concrete release-note draft under `docs/releases/` before tagging.
+
 ## Compatibility Checklist
 
 Before tagging a release:
@@ -30,6 +34,12 @@ Before tagging a release:
 4. State whether direct upgrade is expected to work.
 5. State whether import/export is recommended instead.
 6. Link to `docs/upgrades.md` if operators need a concrete procedure.
+7. Prepare the matching checklist/release-note docs:
+   - `docs/v1-release-checklist.md`
+   - `docs/releases/<version>.md`
+7. Prepare the matching checklist/release-note docs:
+   - `docs/v1-release-checklist.md`
+   - `docs/releases/<version>.md`
 
 ## Current Policy
 

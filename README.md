@@ -25,11 +25,16 @@
 ## Option 1: Download Prebuilt Binary (Recommended)
 
 1. Open GitHub Releases for this repo.
-2. Download the binary for your OS:
+2. Download the binary for your OS.
+3. CLI artifacts:
    - Windows: `skepa_db_cli-windows-x86_64.exe`
    - Linux: `skepa_db_cli-linux-x86_64`
    - macOS (Apple Silicon): `skepa_db_cli-macos-aarch64`
-3. Run it from terminal.
+4. Server artifacts:
+   - Windows: `skepa_db_server-windows-x86_64.exe`
+   - Linux: `skepa_db_server-linux-x86_64`
+   - macOS (Apple Silicon): `skepa_db_server-macos-aarch64`
+5. Run the binary you need from terminal.
 
 If you need another architecture (for example macOS Intel), build from source.
 
@@ -126,6 +131,7 @@ Compatibility and upgrade policy now live in:
 - `docs/upgrades.md`
 - `docs/release-process.md`
 - `docs/server-operations.md`
+- `docs/v1-release-checklist.md`
 
 ## Server Operations
 
