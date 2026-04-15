@@ -132,3 +132,89 @@ fn test_default_values_persist_after_reopen() {
     );
     let _ = std::fs::remove_dir_all(&path);
 }
+
+#[test]
+fn test_describe_reflects_schema_changes_after_reopen() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_describe_reopen_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut db = Database::open_legacy(path.clone());
+        db.execute(r#"create table users (id int primary key, name text default "anon")"#)
+            .unwrap();
+        db.execute("alter table users alter column name set not null")
+            .unwrap();
+        db.execute("create index on users (name)").unwrap();
+        db.execute("drop index on users (name)").unwrap();
+    }
+
+    let mut reopened = Database::open_legacy(path.clone());
+    let result = reopened.execute("describe users").unwrap();
+    assert_select_result(
+        result,
+        &[
+            "column",
+            "type",
+            "primary_key",
+            "unique",
+            "not_null",
+            "default",
+            "indexes",
+        ],
+        vec![
+            vec![
+                Value::Text("id".to_string()),
+                Value::Text("int".to_string()),
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Null,
+                Value::Text("".to_string()),
+            ],
+            vec![
+                Value::Text("name".to_string()),
+                Value::Text("text".to_string()),
+                Value::Bool(false),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Text("anon".to_string()),
+                Value::Text("".to_string()),
+            ],
+        ],
+    );
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_select_stats_after_reopen() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_stats_reopen_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let mut db = Database::open_legacy(path.clone());
+        db.execute("create table users (id int primary key, age int)")
+            .unwrap();
+        db.execute("insert into users values (1, 20)").unwrap();
+        db.execute("insert into users values (2, 30)").unwrap();
+    }
+
+    let mut reopened = Database::open_legacy(path.clone());
+    match reopened.execute("select * from users where age = 30").unwrap() {
+        QueryResult::Select { stats, .. } => {
+            assert_eq!(stats.rows_scanned, Some(2));
+            assert_eq!(stats.index_used, Some(false));
+        }
+        other => panic!("expected select result, got {other:?}"),
+    }
+    match reopened.execute("select * from users where id = 2").unwrap() {
+        QueryResult::Select { stats, .. } => {
+            assert_eq!(stats.rows_scanned, Some(1));
+            assert_eq!(stats.index_used, Some(true));
+        }
+        other => panic!("expected select result, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_dir_all(&path);
+}

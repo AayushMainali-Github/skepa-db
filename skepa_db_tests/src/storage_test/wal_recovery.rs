@@ -62,6 +62,28 @@ fn recovery_replays_committed_wal_transaction() {
 }
 
 #[test]
+fn recovery_replays_insert_that_uses_default_values() {
+    let path = temp_dir("wal_defaults_replayed");
+    {
+        let mut db = Database::open_legacy(path.clone());
+        db.execute_legacy(r#"create table users (id int, name text default "anon")"#)
+            .unwrap();
+    }
+
+    std::fs::write(
+        path.join("wal.log"),
+        "BEGIN 8\nOP 8 insert into users values (1)\nCOMMIT 8\n",
+    )
+    .unwrap();
+
+    {
+        let mut db = Database::open_legacy(path.clone());
+        let out = db.execute_legacy("select * from users").unwrap();
+        assert_eq!(out, "id\tname\n1\tanon");
+    }
+}
+
+#[test]
 fn recovery_replays_only_committed_when_wal_has_mixed_transactions() {
     let path = temp_dir("wal_mixed_recovery");
     {

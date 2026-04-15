@@ -328,6 +328,43 @@ fn test_transaction_rollback_reverts_update_and_delete() {
 }
 
 #[test]
+fn test_transaction_not_equal_update_delete_rollback_and_commit() {
+    let mut db = test_db();
+    db.execute_legacy("create table users (id int primary key, active bool)")
+        .unwrap();
+    db.execute_legacy("insert into users values (1, true)")
+        .unwrap();
+    db.execute_legacy("insert into users values (2, true)")
+        .unwrap();
+    db.execute_legacy("insert into users values (3, true)")
+        .unwrap();
+
+    db.execute_legacy("begin").unwrap();
+    db.execute_legacy("update users set active = false where id != 1")
+        .unwrap();
+    db.execute_legacy("delete from users where active != true")
+        .unwrap();
+    db.execute_legacy("rollback").unwrap();
+    assert_eq!(
+        db.execute_legacy("select * from users order by id asc")
+            .unwrap(),
+        "id\tactive\n1\ttrue\n2\ttrue\n3\ttrue"
+    );
+
+    db.execute_legacy("begin").unwrap();
+    db.execute_legacy("update users set active = false where id != 1")
+        .unwrap();
+    db.execute_legacy("delete from users where active != true")
+        .unwrap();
+    db.execute_legacy("commit").unwrap();
+    assert_eq!(
+        db.execute_legacy("select * from users order by id asc")
+            .unwrap(),
+        "id\tactive\n1\ttrue"
+    );
+}
+
+#[test]
 fn test_transaction_rollback_restores_after_constraint_error() {
     let mut db = test_db();
     db.execute_legacy("create table users (id int primary key, email text unique)")
