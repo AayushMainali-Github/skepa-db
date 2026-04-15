@@ -20,3 +20,7 @@ Desktop.ini
 **/tables/*.rows
 
 .codex-e2e
+
+# Local planning notes
+docs/*plan*.md
+docs/*PLAN*.md
