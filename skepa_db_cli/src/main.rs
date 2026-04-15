@@ -163,7 +163,7 @@ fn print_help() {
     println!(
         "  select <col1,col2|*> from <table> [where <column> <op> <value>] [order by <column> [asc|desc]] [limit <n>]"
     );
-    println!("  where ops: =|eq|>|gt|<|lt|>=|gte|<=|lte|like");
+    println!("  where ops: =|eq|!=|neq|>|gt|<|lt|>=|gte|<=|lte|like");
     println!("  like uses '*' and '?' wildcards, e.g. \"ra*\", \"*ir\", \"*av*\", \"r?m\"");
     println!("  exit|quit     -> quit");
 }

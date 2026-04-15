@@ -3,10 +3,7 @@ use crate::parser::command::{CompareOp, LogicalOp, Predicate, WhereClause};
 pub(super) fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
     match raw.to_lowercase().as_str() {
         "=" | "eq" => Ok(CompareOp::Eq),
-        "!=" => Err(
-            "Operator '!=' is not supported yet. Use '=' for equality or 'is null'/'is not null' for null checks."
-                .to_string(),
-        ),
+        "!=" | "<>" | "neq" => Ok(CompareOp::NotEq),
         ">" | "gt" => Ok(CompareOp::Gt),
         "<" | "lt" => Ok(CompareOp::Lt),
         ">=" | "gte" => Ok(CompareOp::Gte),
@@ -14,7 +11,7 @@ pub(super) fn parse_compare_op(raw: &str) -> Result<CompareOp, String> {
         "like" => Ok(CompareOp::Like),
         "in" => Ok(CompareOp::In),
         _ => Err(format!(
-            "Unknown WHERE operator '{raw}'. Use =|eq|>|gt|<|lt|>=|gte|<=|lte|like|in or 'is null'/'is not null'"
+            "Unknown WHERE operator '{raw}'. Use =|eq|!=|neq|<>|>|gt|<|lt|>=|gte|<=|lte|like|in or 'is null'/'is not null'"
         )),
     }
 }

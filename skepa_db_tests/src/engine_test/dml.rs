@@ -1,6 +1,45 @@
 use super::*;
 
 #[test]
+fn test_update_where_not_equal() {
+    let mut db = test_db();
+    db.execute("create table users (id int, active bool)")
+        .unwrap();
+    db.execute("insert into users values (1, true)").unwrap();
+    db.execute("insert into users values (2, true)").unwrap();
+    db.execute("insert into users values (3, true)").unwrap();
+
+    let update = db
+        .execute("update users set active = false where id != 1")
+        .unwrap();
+    assert_mutation_result(update, "updated 2 row(s) in users", 2);
+
+    let result = db
+        .execute("select id from users where active = false order by id asc")
+        .unwrap();
+    assert_select_result(
+        result,
+        &["id"],
+        vec![vec![Value::Int(2)], vec![Value::Int(3)]],
+    );
+}
+
+#[test]
+fn test_delete_where_not_equal() {
+    let mut db = test_db();
+    db.execute("create table users (id int, city text)").unwrap();
+    db.execute(r#"insert into users values (1, "ny")"#).unwrap();
+    db.execute(r#"insert into users values (2, "la")"#).unwrap();
+    db.execute(r#"insert into users values (3, "sf")"#).unwrap();
+
+    let delete = db.execute(r#"delete from users where city != "ny""#).unwrap();
+    assert_mutation_result(delete, "deleted 2 row(s) from users", 2);
+
+    let result = db.execute("select id from users").unwrap();
+    assert_select_result(result, &["id"], vec![vec![Value::Int(1)]]);
+}
+
+#[test]
 fn test_insert_multiple_rows() {
     let mut db = test_db();
     db.execute("create table users (id int, name text)")

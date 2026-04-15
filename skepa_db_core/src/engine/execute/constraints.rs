@@ -123,6 +123,10 @@ fn matches_where(cell: &Value, dtype: &DataType, op: &CompareOp, rhs_token: &str
             let rhs = parse_value(dtype, rhs_token)?;
             Ok(cell == &rhs)
         }
+        CompareOp::NotEq => {
+            let rhs = parse_value(dtype, rhs_token)?;
+            Ok(cell != &rhs)
+        }
         CompareOp::Gt | CompareOp::Lt | CompareOp::Gte | CompareOp::Lte => {
             let rhs = parse_value(dtype, rhs_token)?;
             let ord = compare_order(cell, &rhs, dtype)?;

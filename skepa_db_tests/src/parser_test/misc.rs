@@ -38,12 +38,6 @@ fn parse_unclosed_quote_errors() {
 }
 
 #[test]
-fn where_not_equal_not_supported() {
-    let err = parse("select * from users where id != 1").unwrap_err();
-    assert!(err.to_lowercase().contains("not supported"));
-}
-
-#[test]
 fn parse_keyword_case_insensitive_commands() {
     let cases = [
         ("CrEaTe TaBlE t (id int)", "create"),

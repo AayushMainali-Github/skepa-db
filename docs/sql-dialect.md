@@ -82,6 +82,8 @@ Supported comparison operators in `where`:
 
 - `=`
 - `eq`
+- `!=`
+- `neq`
 - `>`
 - `gt`
 - `<`
@@ -154,11 +156,10 @@ Rules:
 
 Known unsupported or intentionally different behavior:
 
-- `!=` is not supported
+- SQL three-valued logic is not implemented; `null != value` is true unless `value` is also `null`
 - SQL `%` and `_` wildcards are not used by `like`
 - Nested transactions are not supported
 - Full SQL type coercion and casting rules are not implemented
-- SQL three-valued logic is not implemented
 - `distinct *` inside aggregates is not supported
 - `sum(*)`, `avg(*)`, and `min/max(*)` are not supported
 

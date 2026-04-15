@@ -86,6 +86,28 @@ fn test_select_where_eq_text() {
 }
 
 #[test]
+fn test_select_where_not_equal() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text, city text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "ram", "ny")"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "alice", "la")"#)
+        .unwrap();
+    db.execute("insert into users values (3, \"bob\", null)")
+        .unwrap();
+
+    let result = db
+        .execute(r#"select id from users where city != "ny" order by id asc"#)
+        .unwrap();
+    assert_select_result(
+        result,
+        &["id"],
+        vec![vec![Value::Int(2)], vec![Value::Int(3)]],
+    );
+}
+
+#[test]
 fn test_select_where_eq_null_matches_null_values_by_current_engine_semantics() {
     let mut db = test_db();
     db.execute("create table users (id int, city text)")
