@@ -56,6 +56,8 @@ Implications:
 ## Constraint Timing
 
 - `primary key`, `unique`, and `not null` are checked immediately
+- column defaults are selected during insert before `not null` validation
+- explicit `null` is not replaced by a default
 - referential `restrict`, `cascade`, and `set null` happen during statement execution
 - referential `no action` is validated at commit
 - if deferred `no action` validation fails at commit, the transaction is rolled back to the `begin` snapshot

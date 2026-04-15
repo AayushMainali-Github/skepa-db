@@ -14,6 +14,7 @@ A database directory contains:
 ## Persistence Model
 
 - Catalog metadata is stored in `catalog.json`.
+- Column default metadata is stored in `catalog.json` with the rest of the schema.
 - Table snapshots are stored as line-based row files under `tables/`.
 - Index snapshots are stored as JSON files under `indexes/`.
 
@@ -71,6 +72,7 @@ Recovery rules:
 - committed transactions are replayed
 - uncommitted transactions are ignored
 - explicitly rolled-back transactions are ignored
+- inserts that omit trailing defaulted columns are replayed using the persisted default metadata
 - invalid committed transactions that still violate deferred `no action` constraints are skipped
 - a truncated final WAL tail line is ignored instead of aborting recovery
 

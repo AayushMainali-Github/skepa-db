@@ -34,6 +34,7 @@ Policy:
 - additive request fields may be introduced within the same API version only when they are optional
 - existing endpoint meanings and stable error codes should not change incompatibly within the same API version
 - breaking HTTP API changes require a new API version value
+- v1.1 adds stable error codes and structured result metadata without changing the `v1` API version
 
 Within `v1`, the following are considered part of the stable HTTP contract:
 
@@ -73,6 +74,7 @@ Within `v1`, the following are the storage compatibility promises:
 - a newer unsupported catalog format is rejected explicitly
 - import/export remains the conservative fallback when direct open compatibility is not guaranteed
 - export/import should be treated as the operator-facing recovery path after a storage-format compatibility boundary blocks direct open
+- v1.1 stores column defaults as additive catalog metadata within storage format version `1`
 
 ## Upgrade Compatibility
 
