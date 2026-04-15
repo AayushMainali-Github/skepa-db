@@ -30,12 +30,21 @@ impl Catalog {
             .into_iter()
             .map(|c| Column {
                 name: c.name,
-                dtype: c.dtype,
+                dtype: c.dtype.clone(),
                 primary_key: c.primary_key,
                 unique: c.unique,
                 not_null: c.not_null,
+                default: c.default.clone(),
             })
             .collect();
+
+        for col in &columns {
+            if let Some(default) = &col.default {
+                crate::types::value::parse_value(&col.dtype, default).map_err(|e| {
+                    format!("Invalid DEFAULT for column '{}': {}", col.name, e)
+                })?;
+            }
+        }
 
         for c in &columns {
             if c.primary_key {

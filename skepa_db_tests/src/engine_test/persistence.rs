@@ -111,3 +111,24 @@ fn test_composite_pk_persists_and_rejects_after_reopen() {
 
     let _ = std::fs::remove_dir_all(&path);
 }
+#[test]
+fn test_default_values_persist_after_reopen() {
+    let mut path: PathBuf = std::env::temp_dir();
+    path.push(format!("skepa_db_defaults_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+    {
+        let mut db = Database::open_legacy(path.clone());
+        db.execute(r#"create table users (id int, name text default "anon")"#)
+            .unwrap();
+    }
+
+    let mut reopened = Database::open_legacy(path.clone());
+    reopened.execute("insert into users values (1)").unwrap();
+    let result = reopened.execute("select * from users").unwrap();
+    assert_select_result(
+        result,
+        &["id", "name"],
+        vec![vec![Value::Int(1), Value::Text("anon".to_string())]],
+    );
+    let _ = std::fs::remove_dir_all(&path);
+}

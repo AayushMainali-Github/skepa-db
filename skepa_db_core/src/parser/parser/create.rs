@@ -44,7 +44,7 @@ pub(super) fn parse_create(tokens: &[String]) -> Result<Command, String> {
             let name = tokens[i].clone();
             i += 1;
             let (dtype, next_i) = parse_datatype_in_create(tokens, i, end)?;
-            let (primary_key, unique, not_null, after_constraints) =
+            let (primary_key, unique, not_null, default, after_constraints) =
                 parse_constraints_in_create(tokens, next_i, end)?;
             i = after_constraints;
             cols.push(ColumnDef {
@@ -53,6 +53,7 @@ pub(super) fn parse_create(tokens: &[String]) -> Result<Command, String> {
                 primary_key,
                 unique,
                 not_null,
+                default,
             });
         }
         if i < end {
@@ -155,10 +156,11 @@ fn parse_constraints_in_create(
     tokens: &[String],
     mut i: usize,
     end: usize,
-) -> Result<(bool, bool, bool, usize), String> {
+) -> Result<(bool, bool, bool, Option<String>, usize), String> {
     let mut primary_key = false;
     let mut unique = false;
     let mut not_null = false;
+    let mut default: Option<String> = None;
 
     while i < end && tokens[i] != "," {
         let t = tokens[i].to_lowercase();
@@ -181,6 +183,16 @@ fn parse_constraints_in_create(
                 not_null = true;
                 i += 2;
             }
+            "default" => {
+                if default.is_some() {
+                    return Err("DEFAULT specified more than once for column".to_string());
+                }
+                if i + 1 >= end || tokens[i + 1] == "," {
+                    return Err("Bad DEFAULT constraint. Use default <literal>".to_string());
+                }
+                default = Some(tokens[i + 1].clone());
+                i += 2;
+            }
             other => return Err(format!("Unknown column constraint token '{other}'")),
         }
     }
@@ -190,7 +202,7 @@ fn parse_constraints_in_create(
         not_null = true;
     }
 
-    Ok((primary_key, unique, not_null, i))
+    Ok((primary_key, unique, not_null, default, i))
 }
 
 fn parse_table_constraint_in_create(

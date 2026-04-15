@@ -17,6 +17,7 @@ fn diskstorage_persist_bootstrap_roundtrip() {
             primary_key: false,
             unique: false,
             not_null: false,
+            default: None,
         },
         Column {
             name: "name".to_string(),
@@ -24,7 +25,8 @@ fn diskstorage_persist_bootstrap_roundtrip() {
             primary_key: false,
             unique: false,
             not_null: false,
-        },
+            default: None,
+        }
     ]);
 
     let mut loaded = DiskStorage::new(root).unwrap();
@@ -58,6 +60,7 @@ fn diskstorage_text_escape_roundtrip() {
             primary_key: false,
             unique: false,
             not_null: false,
+            default: None,
         },
         Column {
             name: "name".to_string(),
@@ -65,7 +68,8 @@ fn diskstorage_text_escape_roundtrip() {
             primary_key: false,
             unique: false,
             not_null: false,
-        },
+            default: None,
+        }
     ]);
 
     let mut loaded = DiskStorage::new(root).unwrap();
@@ -202,3 +206,7 @@ fn interrupted_checkpoint_after_update_recovers_deterministically() {
         );
     }
 }
+
+
+
+

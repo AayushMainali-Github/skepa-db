@@ -28,6 +28,7 @@ impl Catalog {
                         primary_key: c.primary_key,
                         unique: c.unique,
                         not_null: c.not_null,
+                        default: c.default.clone(),
                     }
                 })
                 .collect();
@@ -103,6 +104,7 @@ impl Catalog {
                     primary_key: c.primary_key,
                     unique: c.unique,
                     not_null: c.not_null,
+                    default: c.default,
                 });
             }
             let tc = file_constraints.get(&table).cloned().unwrap_or_default();

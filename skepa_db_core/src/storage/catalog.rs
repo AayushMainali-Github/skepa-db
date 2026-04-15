@@ -37,6 +37,8 @@ struct ColumnFile {
     unique: bool,
     #[serde(default)]
     not_null: bool,
+    #[serde(default)]
+    default: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]

@@ -34,6 +34,14 @@ Supported column types:
 
 Values are parsed against the target column type. There is no general implicit cross-type coercion at execution time.
 
+## Column Defaults
+
+- Column definitions may include `default <literal>`.
+- Default literals are validated against the column datatype when the table is created.
+- Current insert syntax does not support explicit column lists, so defaults apply only to omitted trailing values.
+- Explicit `null` remains `null`; it is not replaced by the default.
+- `not null` is enforced after default selection, so omitted defaulted columns can satisfy `not null` if the default is non-null.
+
 ## Type Coercion Rules
 
 - `insert` and `update` values are parsed using the destination column datatype.

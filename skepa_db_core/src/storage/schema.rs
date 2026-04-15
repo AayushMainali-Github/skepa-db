@@ -19,6 +19,8 @@ pub struct Column {
     pub primary_key: bool,
     pub unique: bool,
     pub not_null: bool,
+    #[serde(default)]
+    pub default: Option<String>,
 }
 
 /// Represents the schema of a table (list of columns)

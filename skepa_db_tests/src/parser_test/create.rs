@@ -95,6 +95,25 @@ fn parse_create_with_constraints() {
 }
 
 #[test]
+fn parse_create_with_default_values() {
+    let cmd = parse(r#"create table users (id int, active bool default true, name text default "anon")"#).unwrap();
+    match cmd {
+        Command::Create { columns, .. } => {
+            assert_eq!(columns[1].default.as_deref(), Some("true"));
+            assert_eq!(columns[2].default.as_deref(), Some("anon"));
+        }
+        _ => panic!("Expected Create command"),
+    }
+}
+
+#[test]
+fn parse_create_duplicate_default_errors() {
+    let err = parse("create table t (id int default 1 default 2)").unwrap_err();
+    assert!(err.to_lowercase().contains("default"));
+    assert!(err.to_lowercase().contains("more than once"));
+}
+
+#[test]
 fn parse_primary_key_implies_unique_and_not_null() {
     let cmd = parse("create table t (id int primary key)").unwrap();
     match cmd {

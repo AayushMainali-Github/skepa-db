@@ -38,6 +38,61 @@ fn test_create_insert_select() {
 }
 
 #[test]
+fn test_insert_uses_trailing_default_values() {
+    let mut db = test_db();
+    db.execute(r#"create table users (id int, name text default "anon", active bool default true)"#)
+        .unwrap();
+
+    db.execute("insert into users values (1)").unwrap();
+
+    let result = db.execute("select * from users").unwrap();
+    assert_select_result(
+        result,
+        &["id", "name", "active"],
+        vec![vec![
+            Value::Int(1),
+            Value::Text("anon".to_string()),
+            Value::Bool(true),
+        ]],
+    );
+}
+
+#[test]
+fn test_explicit_null_does_not_use_default() {
+    let mut db = test_db();
+    db.execute(r#"create table users (id int, name text default "anon")"#)
+        .unwrap();
+
+    db.execute("insert into users values (1, null)").unwrap();
+
+    let result = db.execute("select * from users").unwrap();
+    assert_select_result(
+        result,
+        &["id", "name"],
+        vec![vec![Value::Int(1), Value::Null]],
+    );
+}
+
+#[test]
+fn test_missing_non_default_column_still_errors() {
+    let mut db = test_db();
+    db.execute(r#"create table users (id int, name text default "anon", age int)"#)
+        .unwrap();
+
+    let err = db.execute_legacy("insert into users values (1)").unwrap_err();
+    assert!(err.contains("Missing column 'age' has no DEFAULT"));
+}
+
+#[test]
+fn test_invalid_default_value_errors_at_create_time() {
+    let mut db = test_db();
+    let err = db
+        .execute_legacy(r#"create table users (id int, active bool default "yes")"#)
+        .unwrap_err();
+    assert!(err.contains("Invalid DEFAULT for column 'active'"));
+}
+
+#[test]
 fn test_create_duplicate_table() {
     let mut db = test_db();
     db.execute_legacy("create table users (id int, name text)")

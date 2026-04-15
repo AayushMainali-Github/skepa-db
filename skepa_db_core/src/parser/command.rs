@@ -72,6 +72,7 @@ pub struct ColumnDef {
     pub primary_key: bool,
     pub unique: bool,
     pub not_null: bool,
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

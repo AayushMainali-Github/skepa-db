@@ -14,6 +14,7 @@ fn bootstrap_malformed_row_count_errors() {
             primary_key: false,
             unique: false,
             not_null: false,
+            default: None,
         },
         Column {
             name: "name".to_string(),
@@ -21,7 +22,8 @@ fn bootstrap_malformed_row_count_errors() {
             primary_key: false,
             unique: false,
             not_null: false,
-        },
+            default: None,
+        }
     ]);
 
     let mut storage = DiskStorage::new(root).unwrap();
@@ -42,6 +44,7 @@ fn bootstrap_bad_type_prefix_errors() {
             primary_key: false,
             unique: false,
             not_null: false,
+            default: None,
         },
         Column {
             name: "name".to_string(),
@@ -49,7 +52,8 @@ fn bootstrap_bad_type_prefix_errors() {
             primary_key: false,
             unique: false,
             not_null: false,
-        },
+            default: None,
+        }
     ]);
 
     let mut storage = DiskStorage::new(root).unwrap();
@@ -70,6 +74,7 @@ fn bootstrap_dangling_escape_errors() {
             primary_key: false,
             unique: false,
             not_null: false,
+            default: None,
         },
         Column {
             name: "name".to_string(),
@@ -77,7 +82,8 @@ fn bootstrap_dangling_escape_errors() {
             primary_key: false,
             unique: false,
             not_null: false,
-        },
+            default: None,
+        }
     ]);
 
     let mut storage = DiskStorage::new(root).unwrap();
@@ -98,6 +104,7 @@ fn bootstrap_unsupported_escape_errors() {
             primary_key: false,
             unique: false,
             not_null: false,
+            default: None,
         },
         Column {
             name: "name".to_string(),
@@ -105,7 +112,8 @@ fn bootstrap_unsupported_escape_errors() {
             primary_key: false,
             unique: false,
             not_null: false,
-        },
+            default: None,
+        }
     ]);
 
     let mut storage = DiskStorage::new(root).unwrap();
@@ -125,6 +133,7 @@ fn bootstrap_row_id_prefix_only_without_payload_errors() {
         primary_key: false,
         unique: false,
         not_null: false,
+        default: None,
     }]);
 
     let mut storage = DiskStorage::new(root).unwrap();
@@ -189,3 +198,7 @@ fn newer_catalog_format_is_rejected_on_open() {
     let err = Database::open(DbConfig::new(path)).unwrap_err();
     assert!(err.to_string().contains("newer than supported version"));
 }
+
+
+
+

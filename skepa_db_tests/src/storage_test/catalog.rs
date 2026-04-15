@@ -13,6 +13,7 @@ fn catalog_save_load_roundtrip() {
                     primary_key: false,
                     unique: false,
                     not_null: false,
+            default: None,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -20,7 +21,8 @@ fn catalog_save_load_roundtrip() {
                     primary_key: false,
                     unique: false,
                     not_null: false,
-                },
+            default: None,
+                }
             ],
             vec![],
         )
@@ -68,6 +70,7 @@ fn catalog_save_load_roundtrip_with_constraints() {
                     primary_key: true,
                     unique: false,
                     not_null: true,
+            default: None,
                 },
                 ColumnDef {
                     name: "email".to_string(),
@@ -75,7 +78,8 @@ fn catalog_save_load_roundtrip_with_constraints() {
                     primary_key: false,
                     unique: true,
                     not_null: false,
-                },
+            default: None,
+                }
             ],
             vec![],
         )
@@ -90,6 +94,7 @@ fn catalog_save_load_roundtrip_with_constraints() {
                     primary_key: true,
                     unique: false,
                     not_null: true,
+            default: None,
                 },
                 ColumnDef {
                     name: "user_id".to_string(),
@@ -97,7 +102,8 @@ fn catalog_save_load_roundtrip_with_constraints() {
                     primary_key: false,
                     unique: false,
                     not_null: false,
-                },
+            default: None,
+                }
             ],
             vec![],
         )
@@ -148,6 +154,7 @@ fn catalog_save_replaces_file_without_temp_artifacts() {
                 primary_key: true,
                 unique: false,
                 not_null: true,
+                default: None,
             }],
             vec![],
         )
@@ -182,6 +189,7 @@ fn catalog_save_includes_storage_format_version() {
                 primary_key: true,
                 unique: false,
                 not_null: true,
+                default: None,
             }],
             vec![],
         )
@@ -266,3 +274,8 @@ fn catalog_rejects_newer_unsupported_format_version() {
     assert!(err.contains("newer than supported version"));
     assert!(err.contains(&unsupported_version.to_string()));
 }
+
+
+
+
+

@@ -18,17 +18,30 @@ fn handle_insert(
 ) -> Result<QueryResult, String> {
     let schema = catalog.schema(&table)?;
 
-    if values.len() != schema.column_count() {
+    if values.len() > schema.column_count() {
         return Err(format!(
             "Expected {} values but got {}",
             schema.column_count(),
             values.len()
         ));
     }
+    for col in schema.columns.iter().skip(values.len()) {
+        if col.default.is_none() {
+            return Err(format!(
+                "Expected {} values but got {}. Missing column '{}' has no DEFAULT",
+                schema.column_count(),
+                values.len(),
+                col.name
+            ));
+        }
+    }
 
     let mut row: Row = Vec::new();
     for (i, col) in schema.columns.iter().enumerate() {
-        let token = &values[i];
+        let token = values
+            .get(i)
+            .or(col.default.as_ref())
+            .ok_or_else(|| format!("Missing value for column '{}'", col.name))?;
         if col.not_null && token.eq_ignore_ascii_case("null") {
             return Err(format!("Column '{}' is NOT NULL", col.name));
         }

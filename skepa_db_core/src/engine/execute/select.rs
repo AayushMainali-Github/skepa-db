@@ -359,6 +359,7 @@ fn evaluate_grouped_select(
                 primary_key: false,
                 unique: false,
                 not_null: false,
+                default: None,
             });
             select_items.push((
                 true,
@@ -709,6 +710,7 @@ fn build_join_rows(
             primary_key: false,
             unique: false,
             not_null: c.not_null,
+            default: None,
         });
     }
     for c in &right_schema.columns {
@@ -718,6 +720,7 @@ fn build_join_rows(
             primary_key: false,
             unique: false,
             not_null: c.not_null,
+            default: None,
         });
     }
 
