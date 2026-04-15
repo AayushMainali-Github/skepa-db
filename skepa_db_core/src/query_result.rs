@@ -30,7 +30,19 @@ impl QueryResult {
         let stats = ExecutionStats {
             rows_returned: Some(rows.len()),
             rows_affected: None,
+            rows_scanned: None,
+            index_used: None,
         };
+        Self::Select {
+            schema,
+            rows,
+            stats,
+        }
+    }
+
+    pub fn select_with_stats(schema: Schema, rows: Vec<Row>, mut stats: ExecutionStats) -> Self {
+        stats.rows_returned = Some(rows.len());
+        stats.rows_affected = None;
         Self::Select {
             schema,
             rows,
@@ -45,6 +57,8 @@ impl QueryResult {
             stats: ExecutionStats {
                 rows_returned: None,
                 rows_affected: Some(rows_affected),
+                rows_scanned: None,
+                index_used: None,
             },
         }
     }

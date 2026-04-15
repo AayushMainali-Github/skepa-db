@@ -31,6 +31,45 @@ fn test_select_where_eq_int() {
 }
 
 #[test]
+fn test_select_stats_report_full_scan() {
+    let mut db = test_db();
+    db.execute("create table users (id int, name text, age int)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "ram", 20)"#)
+        .unwrap();
+    db.execute(r#"insert into users values (2, "alice", 30)"#)
+        .unwrap();
+
+    let result = db.execute("select * from users where age = 30").unwrap();
+    match result {
+        QueryResult::Select { stats, .. } => {
+            assert_eq!(stats.rows_scanned, Some(2));
+            assert_eq!(stats.index_used, Some(false));
+        }
+        other => panic!("expected select result, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_select_stats_report_primary_key_lookup() {
+    let mut db = test_db();
+    db.execute("create table users (id int primary key, name text)")
+        .unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    db.execute(r#"insert into users values (2, "alice")"#)
+        .unwrap();
+
+    let result = db.execute("select * from users where id = 2").unwrap();
+    match result {
+        QueryResult::Select { stats, .. } => {
+            assert_eq!(stats.rows_scanned, Some(1));
+            assert_eq!(stats.index_used, Some(true));
+        }
+        other => panic!("expected select result, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_select_where_eq_text() {
     let mut db = test_db();
     db.execute_legacy("create table users (id int, name text)")

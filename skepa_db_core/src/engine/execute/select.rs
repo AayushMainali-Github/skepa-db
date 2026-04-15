@@ -21,17 +21,23 @@ fn handle_select(
         let schema = catalog.schema(&table)?;
         (schema.clone(), None)
     };
+    let mut stats = ExecutionStats::default();
 
     let filtered_rows = if let Some(where_clause) = filter {
+        let simple_eq = simple_eq_filter(&where_clause);
         if !is_join
-            && simple_eq_filter(&where_clause).is_some()
+            && simple_eq.is_some()
             && select_schema.primary_key.len() == 1
             && select_schema
                 .primary_key
                 .first()
-                .is_some_and(|pk| pk == &simple_eq_filter(&where_clause).expect("eq").0)
+                .is_some_and(|pk| simple_eq.as_ref().is_some_and(|(col, _)| pk == col))
         {
-            let (_col, val) = simple_eq_filter(&where_clause).expect("eq");
+            let Some((_col, val)) = simple_eq else {
+                return Err("Internal error: expected simple equality filter".to_string());
+            };
+            stats.rows_scanned = Some(1);
+            stats.index_used = Some(true);
             if let Some(row_idx) = storage.lookup_pk_row_index(&table, &select_schema, &val)? {
                 match storage.row(&table, row_idx)? {
                     Some(r) => vec![r.clone()],
@@ -40,11 +46,15 @@ fn handle_select(
             } else {
                 Vec::new()
             }
-        } else if !is_join && simple_eq_filter(&where_clause).is_some() {
-            let (col, val) = simple_eq_filter(&where_clause).expect("eq");
+        } else if !is_join && simple_eq.is_some() {
+            let Some((col, val)) = simple_eq else {
+                return Err("Internal error: expected simple equality filter".to_string());
+            };
             if let Some(row_idx) =
                 storage.lookup_unique_row_index(&table, &select_schema, &col, &val)?
             {
+                stats.rows_scanned = Some(1);
+                stats.index_used = Some(true);
                 match storage.row(&table, row_idx)? {
                     Some(r) => vec![r.clone()],
                     None => Vec::new(),
@@ -52,20 +62,29 @@ fn handle_select(
             } else if let Some(row_indices) =
                 storage.lookup_secondary_row_indices(&table, &select_schema, &col, &val)?
             {
+                stats.rows_scanned = Some(row_indices.len());
+                stats.index_used = Some(true);
                 row_indices
                     .into_iter()
                     .filter_map(|i| storage.row(&table, i).ok().flatten().cloned())
                     .collect()
             } else {
                 let rows = load_base_rows(&table, storage, base_rows.as_ref())?;
+                stats.rows_scanned = Some(rows.len());
+                stats.index_used = Some(false);
                 filter_rows(&select_schema, &rows, &where_clause)?
             }
         } else {
             let rows = load_base_rows(&table, storage, base_rows.as_ref())?;
+            stats.rows_scanned = Some(rows.len());
+            stats.index_used = Some(false);
             filter_rows(&select_schema, &rows, &where_clause)?
         }
     } else {
-        load_base_rows(&table, storage, base_rows.as_ref())?
+        let rows = load_base_rows(&table, storage, base_rows.as_ref())?;
+        stats.rows_scanned = Some(rows.len());
+        stats.index_used = Some(false);
+        rows
     };
 
     let is_grouped = has_group_or_aggregate(columns.as_ref(), group_by.as_ref());
@@ -114,7 +133,7 @@ fn handle_select(
         } else {
             ordered_rows.into_iter().skip(start).collect::<Vec<_>>()
         };
-        return Ok(QueryResult::select(post_schema, sliced_rows));
+        return Ok(QueryResult::select_with_stats(post_schema, sliced_rows, stats));
     }
 
     if having.is_some() {
@@ -146,7 +165,7 @@ fn handle_select(
         } else {
             distinct_rows.into_iter().skip(start).collect::<Vec<_>>()
         };
-        return Ok(QueryResult::select(out_schema, limited_rows));
+        return Ok(QueryResult::select_with_stats(out_schema, limited_rows, stats));
     }
 
     let mut ordered_rows = filtered_rows;
@@ -209,7 +228,7 @@ fn handle_select(
     };
 
     let (out_schema, out_rows) = project_rows(&select_schema, &limited_rows, columns.as_ref())?;
-    Ok(QueryResult::select(out_schema, out_rows))
+    Ok(QueryResult::select_with_stats(out_schema, out_rows, stats))
 }
 
 fn dedupe_rows(rows: Vec<Row>) -> Vec<Row> {

@@ -20,6 +20,8 @@ fn test_query_result_select_serializes_to_json() {
         value["Select"]["stats"]["rows_affected"],
         serde_json::Value::Null
     );
+    assert_eq!(value["Select"]["stats"]["rows_scanned"], 1);
+    assert_eq!(value["Select"]["stats"]["index_used"], false);
 }
 
 #[test]
@@ -41,7 +43,9 @@ fn test_query_result_mutation_serializes_to_json() {
                 "rows_affected": 1,
                 "stats": {
                     "rows_returned": null,
-                    "rows_affected": 1
+                    "rows_affected": 1,
+                    "rows_scanned": null,
+                    "index_used": null
                 }
             }
         })

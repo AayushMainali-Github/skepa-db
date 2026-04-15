@@ -2,6 +2,7 @@ use crate::parser::command::{
     AlterAction, Assignment, ColumnDef, Command, CompareOp, ForeignKeyAction, JoinClause, JoinType,
     LogicalOp, OrderBy, TableConstraintDef, WhereClause,
 };
+use crate::execution_stats::ExecutionStats;
 use crate::query_result::QueryResult;
 use crate::storage::schema::ForeignKeyDef;
 use crate::storage::{Catalog, Column, Schema, StorageEngine};
