@@ -253,6 +253,11 @@ enum ApiErrorCode {
     UniqueViolation,
     NotNullViolation,
     ForeignKeyViolation,
+    InvalidDefault,
+    UnknownTable,
+    UnknownColumn,
+    DuplicateIndex,
+    UnsupportedSyntax,
     Conflict,
     Timeout,
     ExecutionError,
@@ -1235,6 +1240,20 @@ fn map_db_error_response(
         ApiErrorCode::NotNullViolation
     } else if lowercase.contains("foreign key") || lowercase.contains("references") {
         ApiErrorCode::ForeignKeyViolation
+    } else if lowercase.contains("invalid default") {
+        ApiErrorCode::InvalidDefault
+    } else if lowercase.contains("does not exist")
+        && (lowercase.contains("table") || lowercase.contains("storage"))
+    {
+        ApiErrorCode::UnknownTable
+    } else if lowercase.contains("unknown column") {
+        ApiErrorCode::UnknownColumn
+    } else if lowercase.contains("index")
+        && (lowercase.contains("already exists") || lowercase.contains("duplicate"))
+    {
+        ApiErrorCode::DuplicateIndex
+    } else if lowercase.contains("not supported") || lowercase.contains("unsupported") {
+        ApiErrorCode::UnsupportedSyntax
     } else if lowercase.contains("conflict") {
         ApiErrorCode::Conflict
     } else if lowercase.contains("parse") || lowercase.contains("syntax") {
@@ -2409,6 +2428,66 @@ mod tests {
             .expect("body should read");
         let json: Value = serde_json::from_slice(&body).expect("json body should parse");
         assert_eq!(json["error"]["code"], "UNIQUE_VIOLATION");
+    }
+
+    #[tokio::test]
+    async fn execute_endpoint_maps_v1_1_errors_to_stable_codes() {
+        let app = test_app().await;
+
+        let cases = [
+            (
+                r#"{"sql":"create table bad_defaults (id int, active bool default \"yes\")"}"#,
+                "INVALID_DEFAULT",
+            ),
+            (r#"{"sql":"describe missing"}"#, "UNKNOWN_TABLE"),
+            (
+                r#"{"sql":"create table users (id int, name text)"}"#,
+                "",
+            ),
+            (
+                r#"{"sql":"select missing from users"}"#,
+                "UNKNOWN_COLUMN",
+            ),
+            (
+                r#"{"sql":"create index on users (name)"}"#,
+                "",
+            ),
+            (
+                r#"{"sql":"create index on users (name)"}"#,
+                "DUPLICATE_INDEX",
+            ),
+            (
+                r#"{"sql":"select sum(*) from users"}"#,
+                "UNSUPPORTED_SYNTAX",
+            ),
+        ];
+
+        for (body, expected_code) in cases {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/execute")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .expect("request should build"),
+                )
+                .await
+                .expect("request should succeed");
+
+            if expected_code.is_empty() {
+                assert_eq!(response.status(), StatusCode::OK);
+                continue;
+            }
+
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body should read");
+            let json: Value = serde_json::from_slice(&body).expect("json body should parse");
+            assert_eq!(json["error"]["code"], expected_code);
+        }
     }
 
     #[tokio::test]
