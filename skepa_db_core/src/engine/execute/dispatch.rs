@@ -21,6 +21,7 @@ pub fn execute_command(
             filter,
         } => handle_update(table, assignments, filter, catalog, storage),
         Command::Delete { table, filter } => handle_delete(table, filter, catalog, storage),
+        Command::Describe { table } => handle_describe(table, catalog),
         Command::Select {
             table,
             distinct,

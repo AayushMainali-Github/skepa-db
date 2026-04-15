@@ -12,6 +12,7 @@
 - `update`
 - `delete`
 - `select`
+- `describe`
 - `begin`
 - `commit`
 - `rollback`
@@ -137,6 +138,20 @@ Examples:
 - `having` requires either `group by` or aggregate functions.
 - `select *` cannot be used with grouped/aggregate output.
 - Non-aggregated selected columns in grouped queries must appear in `group by`.
+
+## Schema Introspection
+
+- `describe <table>` returns structured table metadata.
+- The result columns are:
+  - `column`
+  - `type`
+  - `primary_key`
+  - `unique`
+  - `not_null`
+  - `default`
+  - `indexes`
+- `primary key` columns are reported as unique because primary keys imply uniqueness.
+- `indexes` contains comma-separated index column sets that include the described column.
 
 ## Join Semantics
 

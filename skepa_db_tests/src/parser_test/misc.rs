@@ -67,6 +67,23 @@ fn parse_keyword_case_insensitive_commands() {
 }
 
 #[test]
+fn parse_describe_basic() {
+    let cmd = parse("describe users").unwrap();
+    match cmd {
+        Command::Describe { table } => assert_eq!(table, "users"),
+        _ => panic!("Expected Describe command"),
+    }
+}
+
+#[test]
+fn parse_describe_usage_errors() {
+    let err = parse("describe").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: describe"));
+    let err = parse("describe users now").unwrap_err();
+    assert!(err.to_lowercase().contains("usage: describe"));
+}
+
+#[test]
 fn parse_drop_index_basic() {
     let cmd = parse("drop index on users (email)").unwrap();
     match cmd {

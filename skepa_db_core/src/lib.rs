@@ -134,6 +134,7 @@ impl Database {
             Command::Insert { table, .. } => Some(table.clone()),
             Command::Update { table, .. } => Some(table.clone()),
             Command::Delete { table, .. } => Some(table.clone()),
+            Command::Describe { .. } => None,
             Command::Select { .. } => None,
             Command::Begin | Command::Commit | Command::Rollback => None,
         };

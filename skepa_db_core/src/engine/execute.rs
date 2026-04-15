@@ -16,6 +16,7 @@ include!("execute/dispatch.rs");
 include!("execute/ddl.rs");
 include!("execute/foreign_keys.rs");
 include!("execute/dml.rs");
+include!("execute/describe.rs");
 include!("execute/select.rs");
 include!("execute/mutations.rs");
 include!("execute/filter_project.rs");

@@ -84,6 +84,64 @@ fn test_missing_non_default_column_still_errors() {
 }
 
 #[test]
+fn test_describe_returns_schema_metadata() {
+    let mut db = test_db();
+    db.execute(r#"create table users (id int primary key, email text unique, name text not null default "anon")"#)
+        .unwrap();
+    db.execute("create index on users (name)").unwrap();
+
+    let result = db.execute("describe users").unwrap();
+    assert_select_result(
+        result,
+        &[
+            "column",
+            "type",
+            "primary_key",
+            "unique",
+            "not_null",
+            "default",
+            "indexes",
+        ],
+        vec![
+            vec![
+                Value::Text("id".to_string()),
+                Value::Text("int".to_string()),
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Null,
+                Value::Text("".to_string()),
+            ],
+            vec![
+                Value::Text("email".to_string()),
+                Value::Text("text".to_string()),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Null,
+                Value::Text("".to_string()),
+            ],
+            vec![
+                Value::Text("name".to_string()),
+                Value::Text("text".to_string()),
+                Value::Bool(false),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Text("anon".to_string()),
+                Value::Text("name".to_string()),
+            ],
+        ],
+    );
+}
+
+#[test]
+fn test_describe_missing_table_errors() {
+    let mut db = test_db();
+    let err = db.execute_legacy("describe missing").unwrap_err();
+    assert!(err.contains("Table 'missing' does not exist"));
+}
+
+#[test]
 fn test_invalid_default_value_errors_at_create_time() {
     let mut db = test_db();
     let err = db

@@ -157,6 +157,10 @@ pub enum Command {
         filter: WhereClause,
     },
 
+    Describe {
+        table: String,
+    },
+
     Select {
         table: String,
         distinct: bool,
