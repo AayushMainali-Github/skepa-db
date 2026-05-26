@@ -2440,18 +2440,9 @@ mod tests {
                 "INVALID_DEFAULT",
             ),
             (r#"{"sql":"describe missing"}"#, "UNKNOWN_TABLE"),
-            (
-                r#"{"sql":"create table users (id int, name text)"}"#,
-                "",
-            ),
-            (
-                r#"{"sql":"select missing from users"}"#,
-                "UNKNOWN_COLUMN",
-            ),
-            (
-                r#"{"sql":"create index on users (name)"}"#,
-                "",
-            ),
+            (r#"{"sql":"create table users (id int, name text)"}"#, ""),
+            (r#"{"sql":"select missing from users"}"#, "UNKNOWN_COLUMN"),
+            (r#"{"sql":"create index on users (name)"}"#, ""),
             (
                 r#"{"sql":"create index on users (name)"}"#,
                 "DUPLICATE_INDEX",

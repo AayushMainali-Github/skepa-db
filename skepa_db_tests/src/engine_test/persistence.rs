@@ -201,14 +201,20 @@ fn test_select_stats_after_reopen() {
     }
 
     let mut reopened = Database::open_legacy(path.clone());
-    match reopened.execute("select * from users where age = 30").unwrap() {
+    match reopened
+        .execute("select * from users where age = 30")
+        .unwrap()
+    {
         QueryResult::Select { stats, .. } => {
             assert_eq!(stats.rows_scanned, Some(2));
             assert_eq!(stats.index_used, Some(false));
         }
         other => panic!("expected select result, got {other:?}"),
     }
-    match reopened.execute("select * from users where id = 2").unwrap() {
+    match reopened
+        .execute("select * from users where id = 2")
+        .unwrap()
+    {
         QueryResult::Select { stats, .. } => {
             assert_eq!(stats.rows_scanned, Some(1));
             assert_eq!(stats.index_used, Some(true));

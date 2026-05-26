@@ -40,8 +40,10 @@ fn test_create_insert_select() {
 #[test]
 fn test_insert_uses_trailing_default_values() {
     let mut db = test_db();
-    db.execute(r#"create table users (id int, name text default "anon", active bool default true)"#)
-        .unwrap();
+    db.execute(
+        r#"create table users (id int, name text default "anon", active bool default true)"#,
+    )
+    .unwrap();
 
     db.execute("insert into users values (1)").unwrap();
 
@@ -79,7 +81,9 @@ fn test_missing_non_default_column_still_errors() {
     db.execute(r#"create table users (id int, name text default "anon", age int)"#)
         .unwrap();
 
-    let err = db.execute_legacy("insert into users values (1)").unwrap_err();
+    let err = db
+        .execute_legacy("insert into users values (1)")
+        .unwrap_err();
     assert!(err.contains("Missing column 'age' has no DEFAULT"));
 }
 

@@ -103,14 +103,10 @@ fn row_id_format_backward_compat_without_prefix() {
             unique: false,
             not_null: false,
             default: None,
-        }
+        },
     ]);
     storage.bootstrap_table("users", &schema).unwrap();
     storage.persist_table("users").unwrap();
     let rows = std::fs::read_to_string(root.join("tables").join("users.rows")).unwrap();
     assert!(rows.lines().all(|l| l.starts_with('@')));
 }
-
-
-
-

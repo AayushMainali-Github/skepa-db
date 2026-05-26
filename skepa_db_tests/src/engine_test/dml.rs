@@ -27,12 +27,15 @@ fn test_update_where_not_equal() {
 #[test]
 fn test_delete_where_not_equal() {
     let mut db = test_db();
-    db.execute("create table users (id int, city text)").unwrap();
+    db.execute("create table users (id int, city text)")
+        .unwrap();
     db.execute(r#"insert into users values (1, "ny")"#).unwrap();
     db.execute(r#"insert into users values (2, "la")"#).unwrap();
     db.execute(r#"insert into users values (3, "sf")"#).unwrap();
 
-    let delete = db.execute(r#"delete from users where city != "ny""#).unwrap();
+    let delete = db
+        .execute(r#"delete from users where city != "ny""#)
+        .unwrap();
     assert_mutation_result(delete, "deleted 2 row(s) from users", 2);
 
     let result = db.execute("select id from users").unwrap();

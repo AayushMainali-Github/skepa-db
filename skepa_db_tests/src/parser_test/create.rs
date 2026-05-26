@@ -96,7 +96,9 @@ fn parse_create_with_constraints() {
 
 #[test]
 fn parse_create_with_default_values() {
-    let cmd = parse(r#"create table users (id int, active bool default true, name text default "anon")"#).unwrap();
+    let cmd =
+        parse(r#"create table users (id int, active bool default true, name text default "anon")"#)
+            .unwrap();
     match cmd {
         Command::Create { columns, .. } => {
             assert_eq!(columns[1].default.as_deref(), Some("true"));

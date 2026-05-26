@@ -13,7 +13,7 @@ fn catalog_save_load_roundtrip() {
                     primary_key: false,
                     unique: false,
                     not_null: false,
-            default: None,
+                    default: None,
                 },
                 ColumnDef {
                     name: "name".to_string(),
@@ -21,8 +21,8 @@ fn catalog_save_load_roundtrip() {
                     primary_key: false,
                     unique: false,
                     not_null: false,
-            default: None,
-                }
+                    default: None,
+                },
             ],
             vec![],
         )
@@ -70,7 +70,7 @@ fn catalog_save_load_roundtrip_with_constraints() {
                     primary_key: true,
                     unique: false,
                     not_null: true,
-            default: None,
+                    default: None,
                 },
                 ColumnDef {
                     name: "email".to_string(),
@@ -78,8 +78,8 @@ fn catalog_save_load_roundtrip_with_constraints() {
                     primary_key: false,
                     unique: true,
                     not_null: false,
-            default: None,
-                }
+                    default: None,
+                },
             ],
             vec![],
         )
@@ -94,7 +94,7 @@ fn catalog_save_load_roundtrip_with_constraints() {
                     primary_key: true,
                     unique: false,
                     not_null: true,
-            default: None,
+                    default: None,
                 },
                 ColumnDef {
                     name: "user_id".to_string(),
@@ -102,8 +102,8 @@ fn catalog_save_load_roundtrip_with_constraints() {
                     primary_key: false,
                     unique: false,
                     not_null: false,
-            default: None,
-                }
+                    default: None,
+                },
             ],
             vec![],
         )
@@ -274,8 +274,3 @@ fn catalog_rejects_newer_unsupported_format_version() {
     assert!(err.contains("newer than supported version"));
     assert!(err.contains(&unsupported_version.to_string()));
 }
-
-
-
-
-
