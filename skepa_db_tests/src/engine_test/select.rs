@@ -55,7 +55,8 @@ fn test_select_stats_report_primary_key_lookup() {
     let mut db = test_db();
     db.execute("create table users (id int primary key, name text)")
         .unwrap();
-    db.execute(r#"insert into users values (1, "ram")"#).unwrap();
+    db.execute(r#"insert into users values (1, "ram")"#)
+        .unwrap();
     db.execute(r#"insert into users values (2, "alice")"#)
         .unwrap();
 
